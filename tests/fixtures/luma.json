@@ -1,0 +1,129 @@
+{
+ "entries": [
+  {
+   "api_id": "evt-GBmrVcljPOXQC9S",
+   "event": {
+    "api_id": "evt-GBmrVcljPOXQC9S",
+    "name": "HackwithBay 4.0",
+    "start_at": "2026-11-24T17:30:00.000Z",
+    "end_at": "2026-11-25T02:30:00.000Z",
+    "timezone": "America/Los_Angeles",
+    "url": "x05cmrqh",
+    "location_type": "offline",
+    "cover_url": "https://images.lumacdn.com/uploads/by/c2d71b2b-4ba8-4b8f-9ab2-bb79ef9032f4.jpg",
+    "geo_address_info": {
+     "mode": "obfuscated",
+     "city": "San Francisco",
+     "city_state": "San Francisco, CA",
+     "sublocality": "Financial District",
+     "country": "United States",
+     "country_code": "US",
+     "region": "California",
+     "region_short": "CA"
+    }
+   },
+   "calendar": {
+    "name": "Devnovate"
+   },
+   "guest_count": 622,
+   "hosts": [
+    {
+     "name": "Aviral"
+    },
+    {
+     "name": "AWS Builder Loft"
+    }
+   ]
+  },
+  {
+   "api_id": "evt-MeyQcbVOIcrprsb",
+   "event": {
+    "api_id": "evt-MeyQcbVOIcrprsb",
+    "name": "SF Non-Slop Hackathon | Pangram x Kino x Capy x Paper",
+    "start_at": "2026-11-25T01:00:00.000Z",
+    "end_at": "2026-11-25T06:00:00.000Z",
+    "timezone": "America/Los_Angeles",
+    "url": "32d8mqid",
+    "location_type": "offline",
+    "cover_url": "https://images.lumacdn.com/uploads/ae/f33ffbf4-2c81-4e3a-817a-52f8bac41432.png",
+    "geo_address_info": {
+     "mode": "obfuscated",
+     "city": "San Francisco",
+     "city_state": "San Francisco, CA",
+     "sublocality": "SoMa",
+     "country": "United States",
+     "country_code": "US",
+     "region": "California",
+     "region_short": "CA"
+    }
+   },
+   "calendar": {
+    "name": "Pangram"
+   },
+   "guest_count": 0,
+   "hosts": [
+    {
+     "name": "Pangram Labs"
+    },
+    {
+     "name": "Luke Igel"
+    }
+   ]
+  },
+  {
+   "api_id": "evt-pzre8aFnRkdDvfB",
+   "event": {
+    "api_id": "evt-pzre8aFnRkdDvfB",
+    "name": "Launch Day Hackathon",
+    "start_at": "2026-11-28T09:00:00.000Z",
+    "end_at": "2026-11-28T19:00:00.000Z",
+    "timezone": "Europe/Paris",
+    "url": "fg1lny5k",
+    "location_type": "offline",
+    "cover_url": "https://images.lumacdn.com/uploads/cs/c69df464-4474-46aa-b66b-ccbc3a5c05e6.gif",
+    "geo_address_info": {
+     "mode": "obfuscated",
+     "city": "Paris",
+     "city_state": "Paris, France",
+     "sublocality": "Porte-Saint-Denis",
+     "country": "France",
+     "country_code": "FR",
+     "region": "\u00cele-de-France",
+     "region_short": "IDF"
+    }
+   },
+   "calendar": {
+    "name": "borvibe"
+   },
+   "guest_count": 115,
+   "hosts": [
+    {
+     "name": "Boris"
+    },
+    {
+     "name": "Mollie Payments"
+    }
+   ]
+  },
+  {
+   "api_id": "evt-noise",
+   "event": {
+    "api_id": "evt-noise",
+    "name": "Founders Coffee Meetup",
+    "start_at": "2026-12-01T10:00:00.000Z",
+    "end_at": "2026-12-01T12:00:00.000Z",
+    "timezone": "UTC",
+    "url": "coffee",
+    "location_type": "offline",
+    "cover_url": null,
+    "geo_address_info": null
+   },
+   "calendar": {
+    "name": null
+   },
+   "guest_count": 3,
+   "hosts": []
+  }
+ ],
+ "has_more": false
+}
