@@ -26,7 +26,7 @@ def test_naive_datetimes_rejected():
 
 def test_next_deadline_and_open():
     h = hk("a", registration_closes_at=NOW - timedelta(days=1), submission_deadline=NOW + timedelta(days=2))
-    assert h.next_deadline(NOW) == ("submission due", NOW + timedelta(days=2))
+    assert h.next_deadline(NOW) == ("submission due", NOW + timedelta(days=2), False)
     assert h.is_open(NOW)
     closed = hk("b", registration_closes_at=NOW - timedelta(hours=1))
     assert closed.next_deadline(NOW) is None and not closed.is_open(NOW)
@@ -55,10 +55,10 @@ def test_select_filters_and_sorts():
         hk("past", registration_closes_at=NOW - timedelta(days=1)),
         hk("nodate"),
     ]
-    assert [h.source_id for h in cli.select(items, now=NOW)] == ["soon", "far", "nodate"]
-    assert [h.source_id for h in cli.select(items, now=NOW, within_days=7)] == ["soon"]
-    assert [h.source_id for h in cli.select(items, now=NOW, modes=[Mode.ONLINE])] == ["soon"]
-    assert [h.source_id for h in cli.select(items, now=NOW, search="ai")] == ["soon"]
+    assert [lst.primary.source_id for lst in cli.select(items, now=NOW)] == ["soon", "far", "nodate"]
+    assert [lst.primary.source_id for lst in cli.select(items, now=NOW, within_days=7)] == ["soon"]
+    assert [lst.primary.source_id for lst in cli.select(items, now=NOW, modes=[Mode.ONLINE])] == ["soon"]
+    assert [lst.primary.source_id for lst in cli.select(items, now=NOW, search="ai")] == ["soon"]
     assert len(cli.select(items, now=NOW, include_closed=True)) == 4
 
 

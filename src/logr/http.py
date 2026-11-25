@@ -36,7 +36,7 @@ class Http:
             time.sleep(wait)
         self._last = time.monotonic()
 
-    def request_json(self, method: str, url: str, **kw: Any) -> Any:
+    def request(self, method: str, url: str, **kw: Any) -> httpx.Response:
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):
             self._throttle()
@@ -48,18 +48,24 @@ class Http:
                     time.sleep(min(delay, 30))
                     continue
                 resp.raise_for_status()
-                return resp.json()
-            except (httpx.TransportError, httpx.DecodingError) as exc:
+                return resp
+            except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < self.retries:
                     time.sleep(self.backoff * 2**attempt)
         raise last_exc  # type: ignore[misc]
 
     def get_json(self, url: str, **kw: Any) -> Any:
-        return self.request_json("GET", url, **kw)
+        return self.request("GET", url, **kw).json()
 
     def post_json(self, url: str, **kw: Any) -> Any:
-        return self.request_json("POST", url, **kw)
+        return self.request("POST", url, **kw).json()
+
+    def get_text(self, url: str, **kw: Any) -> str:
+        # "*/*", not "text/html": Devpost's edge answers 403 to an HTML Accept
+        # header from a non-browser user agent, and we don't pretend to be a browser.
+        headers = {"Accept": "*/*"} | kw.pop("headers", {})
+        return self.request("GET", url, headers=headers, **kw).text
 
     def close(self) -> None:
         self.client.close()

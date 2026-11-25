@@ -5,14 +5,19 @@ Endpoint: GET https://api.lu.ma/discover/get-paginated-events
 This is the website's own (undocumented) endpoint; Luma's official API needs a
 Luma Plus key and only covers calendars you manage. Luma events have no
 separate registration deadline, so we treat the event start as the last moment
-to register (``dates_approximate``). Full-text search is fuzzy, so results are
+to register (flagged in ``approx_fields``). Full-text search is fuzzy, so results are
 kept only when the title looks like a hackathon.
+
+Without coordinates Luma returns a global mix. ``latitude``/``longitude`` scope
+results to that area, so the connector can search several places
+(``places=["bengaluru", "12.97,77.59", ...]``) plus the global feed.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from itertools import product
 from typing import Any
 
 from logr.models import Hackathon, Mode, Source
@@ -20,18 +25,48 @@ from logr.sources.base import Connector, clean, parse_dt
 
 API = "https://api.lu.ma/discover/get-paginated-events"
 QUERIES = ("hackathon", "buildathon")
+PLACES: dict[str, tuple[float, float]] = {
+    "bengaluru": (12.97, 77.59), "bangalore": (12.97, 77.59), "delhi": (28.61, 77.21),
+    "mumbai": (19.08, 72.88), "hyderabad": (17.39, 78.49), "chennai": (13.08, 80.27),
+    "pune": (18.52, 73.86), "kolkata": (22.57, 88.36), "ahmedabad": (23.02, 72.57),
+    "kochi": (9.93, 76.27), "san-francisco": (37.77, -122.42), "new-york": (40.71, -74.01),
+    "london": (51.51, -0.13), "berlin": (52.52, 13.40), "paris": (48.86, 2.35),
+    "singapore": (1.35, 103.82), "dubai": (25.20, 55.27), "toronto": (43.65, -79.38),
+}
+
+
+def resolve_place(place: str) -> tuple[float, float]:
+    """A known city slug or a "lat,lng" pair."""
+    key = place.strip().lower().replace(" ", "-")
+    if key in PLACES:
+        return PLACES[key]
+    try:
+        lat, lng = (float(x) for x in key.split(","))
+    except ValueError:
+        raise ValueError(f"unknown place {place!r}; use one of {', '.join(sorted(PLACES))} or 'lat,lng'") from None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise ValueError(f"coordinates out of range: {place!r}")
+    return lat, lng
+
+
 HACKY = re.compile(r"hack|buildathon|build\s*day|ideathon|codefest|game\s*jam|datathon", re.I)
 
 
 class LumaConnector(Connector):
     source = Source.LUMA
 
+    def __init__(self, http: Any, *, places: list[str] | tuple[str, ...] = (), **kw: Any) -> None:
+        super().__init__(http, **kw)
+        self.coords: list[tuple[float, float] | None] = [None, *(resolve_place(p) for p in places)]
+
     def fetch(self) -> Iterator[Hackathon]:
         seen: set[str] = set()
-        for q in QUERIES:
+        for coord, q in product(self.coords, QUERIES):
             cursor: str | None = None
             for _ in range(self.max_pages):
                 params: dict[str, Any] = {"query": q, "pagination_limit": 50}
+                if coord:
+                    params["latitude"], params["longitude"] = coord
                 if cursor:
                     params["pagination_cursor"] = cursor
                 data = self.http.get_json(API, params=params)
@@ -70,5 +105,5 @@ class LumaConnector(Connector):
                 registration_closes_at=start,
                 starts_at=start,
                 ends_at=parse_dt(ev.get("end_at")),
-                dates_approximate=True,
+                approx_fields=["registration_closes_at"] if start else [],
             )
