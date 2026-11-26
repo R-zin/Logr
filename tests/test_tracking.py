@@ -320,9 +320,42 @@ def test_upcoming_interested_includes_registration(listing):
     ]
 
 
-@pytest.mark.parametrize("status", [Status.REGISTERED, Status.TEAM_FORMED, Status.SUBMITTED, Status.SHORTLISTED])
+@pytest.mark.parametrize("status", [Status.REGISTERED, Status.TEAM_FORMED])
 def test_upcoming_registered_drops_registration(listing, status):
     assert [d.label for d in upcoming(listing, _t(status), NOW)] == ["Prototype Round ends", "submission due"]
+
+
+@pytest.fixture
+def staged():
+    """Idea round open now; prototype round starts later."""
+    return hk(
+        submission_deadline=datetime(2026, 12, 20, tzinfo=UTC),
+        rounds=[Round(name="Idea Submission", starts_at=datetime(2026, 11, 1, tzinfo=UTC),
+                      ends_at=datetime(2026, 11, 30, tzinfo=UTC)),
+                Round(name="Prototype Submission", starts_at=datetime(2026, 12, 5, tzinfo=UTC),
+                      ends_at=datetime(2026, 12, 20, tzinfo=UTC))],
+    )
+
+
+@pytest.mark.parametrize("status", [Status.SUBMITTED, Status.SHORTLISTED])
+def test_upcoming_after_submitting_only_later_stages(staged, status):
+    # the open idea round and the generic "submission due" are done for you;
+    # the prototype round hasn't started, so it's still ahead
+    assert [d.label for d in upcoming(staged, _t(status), NOW)] == ["Prototype Submission ends"]
+
+
+def test_upcoming_after_submitting_single_stage_leaves_only_todos(listing):
+    t = _t(Status.SUBMITTED, [ChecklistItem(1, "record demo video", False, datetime(2026, 12, 1, tzinfo=UTC))])
+    assert [d.label for d in upcoming(listing, t, NOW)] == ["todo: record demo video"]
+
+
+def test_registration_tie_does_not_hide_round_deadline():
+    # Live case (Inceptrix 3.0): registration and Round 1 close at the same minute.
+    same = datetime(2026, 12, 24, 18, 29, tzinfo=UTC)
+    h = hk(registration_closes_at=same,
+           rounds=[Round(name="Round 1: Idea Submission", ends_at=same)])
+    assert [d.label for d in h.deadlines()] == ["registration closes", "Round 1: Idea Submission ends"]
+    assert next_action(h, _t(Status.REGISTERED), NOW).label == "Round 1: Idea Submission ends"
 
 
 @pytest.mark.parametrize("status", sorted(TERMINAL))

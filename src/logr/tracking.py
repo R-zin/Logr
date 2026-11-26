@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from logr.models import Deadline, Hackathon, utcnow
+from logr.models import Deadline, Hackathon, RoundKind, utcnow
 
 LOCAL_USER = "local"
 
@@ -356,8 +356,11 @@ def upcoming(h: Hackathon | None, t: Tracked, now: datetime) -> list[Deadline]:
 
     - terminal status (won/lost/withdrawn): nothing, not even todos.
     - interested: all of ``h.deadlines()``.
-    - registered / team_formed / submitted / shortlisted: ``h.deadlines()`` minus
-      "registration closes" (you're already in).
+    - registered / team_formed: ``h.deadlines()`` minus "registration closes"
+      (you're already in).
+    - submitted / shortlisted: only submission rounds that haven't *started* yet
+      (later stages, e.g. a prototype round after the idea round). The deadline
+      you just submitted for, or the generic "submission due", no longer applies.
     - plus every not-done checklist item with a due date, labelled ``"todo: <text>"``
       (approximate=False).
 
@@ -367,9 +370,13 @@ def upcoming(h: Hackathon | None, t: Tracked, now: datetime) -> list[Deadline]:
         return []
     out: list[Deadline] = []
     if h is not None:
-        ds = h.deadlines()
-        if t.status is not Status.INTERESTED:
-            ds = [d for d in ds if d.label != "registration closes"]
+        if t.status in (Status.SUBMITTED, Status.SHORTLISTED):
+            ds = [Deadline(f"{r.name} ends", r.ends_at, False) for r in h.rounds
+                  if r.kind is RoundKind.SUBMISSION and r.ends_at and r.starts_at and r.starts_at > now]
+        else:
+            ds = h.deadlines()
+            if t.status is not Status.INTERESTED:
+                ds = [d for d in ds if d.label != "registration closes"]
         out.extend(ds)
     out.extend(Deadline(f"todo: {item.text}", item.due_at, False)
                for item in t.checklist if not item.done and item.due_at is not None)

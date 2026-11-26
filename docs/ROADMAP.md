@@ -48,11 +48,31 @@ Each source was tested from a server with plain HTTPS requests. Everything in th
 
 **Done when:** Devpost and Unstop deadlines are exact after a sync, multi-stage timelines show in `logr show`, and duplicates merge. Met: 132/132 open Devpost and 150 Unstop detail pages enriched with 0 failures, and 5 duplicates merged on live data.
 
-### Phase 3: Personal tracking
-- Accounts (start with a single user locally) and a `tracked` table with status `interested → registered → team formed → submitted → shortlisted → won/lost`
-- Personal notes, team members, the project repo URL and checklist items for each hackathon
-- Filters for saved searches and preferences: online only, region, themes, prize above a threshold, team size
-- CLI: `logr track <uid>`, `logr status-set`, `logr mine`
+### Phase 3: Personal tracking ✅
+- **Pipeline** (`logr/tracking.py`): `interested → registered → team_formed → submitted → shortlisted → won / lost / withdrawn`. Any move is allowed, since people fix mistakes, and every change is kept in a status history with an optional note.
+- **Per-hackathon workspace:** timestamped notes, project repo URL, teammates, and a checklist with optional due dates.
+- **Status-aware deadlines.** `mine` shows the *next thing you have to do*, not just the listing's next date:
+  - *interested:* every deadline;
+  - *registered / team formed:* registration drops off;
+  - *submitted / shortlisted:* only later stages that haven't started yet (such as a prototype round after the idea round);
+  - *won / lost / withdrawn:* nothing;
+  - at every stage before that, to-dos with due dates count as deadlines.
+
+  If you track one copy of a hackathon that's merged across sources, its deadlines come from the merged group's most precise record.
+- **Filters** (`logr/searches.py`):
+  - themes;
+  - region, with city aliases so "bengaluru" also matches "Bangalore" (and Gurugram/Gurgaon, etc.);
+  - minimum prize: amounts in $/₹/€/£ and ISO codes, including K/M/lakh/crore, are converted to USD at fixed approximate rates;
+  - team size;
+  - plus everything from Phases 1–2.
+
+  On live data every Devpost and Unstop prize parses. Devfolio lists only prize *names*, so it can't match a minimum prize.
+- **Saved searches** (`logr search save/ls/rm`, `logr list --saved NAME`). Explicit flags add to or override a saved search.
+- **Preferences** (`logr prefs`): `tz`, `luma_near`, and `default_search`, which is applied by `list` unless you pass `--no-prefs`.
+- **Accounts:** single local user for now. Every new table carries `user_id = 'local'`, so Phase 4 can add real accounts without migrating data.
+- Built by three parallel agents (tracking, searches, CLI) against interface contracts written first. The status-change command is `logr mark`, because `logr status` already reports sync health.
+
+**Done when:** you can track a hackathon, move it through the pipeline, and `logr mine` shows the next action per hackathon in your timezone. Met: 217 tests pass, and the commands were checked against live data.
 
 ### Phase 4: API and web dashboard
 - FastAPI service over the same store (move to Postgres here), with OpenAPI docs

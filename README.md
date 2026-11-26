@@ -2,7 +2,7 @@
 
 Logr finds hackathons on Devpost, Devfolio, Unstop, Hack2skill and Luma, and tracks their registration, round and submission deadlines in one place. LinkedIn support comes later; see the roadmap.
 
-The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation) and 2 (exact deadlines, round timelines and cross-source dedupe) are done.
+The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation), 2 (exact deadlines, round timelines and cross-source dedupe) and 3 (personal tracking, filters and saved searches) are done.
 
 ## Quick start
 
@@ -40,19 +40,55 @@ Inceptrix 3.0
     devpost     https://inceptrix-hackathon.devpost.com/  (devpost:32017)
 ```
 
+## Tracking your hackathons
+
+```bash
+logr prefs set tz Asia/Kolkata                 # show every time in IST from now on
+logr track unstop:1794479                      # starts as "interested"
+logr mark unstop:1794479 registered --note "team of 4"
+logr team unstop:1794479 add Asha
+logr todo unstop:1794479 add Finish idea deck --due 2026-12-20
+logr mine
+```
+
+```
+STATUS       NEXT ACTION                  WHEN                         IN  TITLE
+interested   submission due               05 Dec 2026 03:30        8d 16h  Kiroween 2026
+registered   todo: Finish idea deck       20 Dec 2026 23:59       24d 12h  Inceptrix 3.0
+submitted    —                            —                                MakerSpark
+```
+
+NEXT ACTION depends on your status. Once you're registered, "registration closes" stops showing. Once you've submitted, only later stages that haven't started yet remain. Your to-dos count as deadlines too. Tracked hackathons get a ★ in `logr list`.
+
+### Finding the right ones
+
+```bash
+logr list --theme ai --region bengaluru --min-prize 1000 --team-size 4
+logr search save blr-ai --theme ai --region bengaluru
+logr list --saved blr-ai -w 14                 # saved search plus a 14-day window
+logr prefs set default_search blr-ai           # applied to every `logr list` (--no-prefs to skip)
+```
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `logr sync` | Fetch listings and the detail pages of open hackathons, then upsert them. Prints real deadline moves. Flags: `-s SOURCE` (repeatable), `--no-enrich`, `--enrich-ttl HOURS` (12), `--enrich-limit N` (150 per source), `--luma-near PLACE` (city slug or `lat,lng`, repeatable) |
-| `logr list` | Open hackathons sorted by next deadline, with duplicates merged. Flags: `-s SOURCE`, `-m online\|offline\|hybrid`, `-w DAYS`, `-q TEXT`, `-a` (include closed and delisted), `--no-merge`, `-n N`, `-f table\|json\|csv`, `-v` (show uid, url and other listings) |
+| `logr list` | Open hackathons sorted by next deadline, with duplicates merged. Flags: `-s SOURCE`, `-m online\|offline\|hybrid`, `-w DAYS`, `-q TEXT`, `--theme T`, `--region R`, `--min-prize USD`, `--team-size N`, `--saved NAME`, `--no-prefs`, `-a` (include closed and delisted), `--no-merge`, `-n N`, `-f table\|json\|csv`, `-v` (show uid, url and other listings) |
 | `logr show <uid>` | Full details, the round timeline, other listings and the history of date changes |
 | `logr status` | Result of the last sync for each source, including detail pages fetched and listings delisted |
+| `logr track UID [--status S]` / `logr untrack UID` | Start or stop tracking a hackathon. Untracking deletes its notes, team and checklist. |
+| `logr mark UID STATUS [--note TEXT]` | Move through `interested`, `registered`, `team_formed`, `submitted`, `shortlisted`, `won`, `lost`, `withdrawn` |
+| `logr mine [--status S] [--all]` | Your tracked hackathons, sorted by next action. Won, lost and withdrawn are hidden unless you pass `--all`. |
+| `logr note UID TEXT` · `logr repo UID URL\|--clear` · `logr team UID add\|rm NAME` | Notes (timestamped), project repo, teammates |
+| `logr todo UID add TEXT [--due DATE]` · `done\|undo\|rm ID` | Checklist. `--due` takes `YYYY-MM-DD` (23:59 that day) or `YYYY-MM-DD HH:MM`, in your display timezone. |
+| `logr search save NAME [filters]` · `ls` · `rm NAME` | Saved searches. Use one with `logr list --saved NAME`. |
+| `logr prefs` · `prefs set KEY VALUE` · `prefs unset KEY` | Preferences: `tz`, `luma_near`, `default_search` |
 
 Global options and environment variables:
 - `--db PATH` or `$LOGR_DB`. The default is `~/.local/share/logr/logr.db`; Phase 1 databases upgrade in place.
-- `--tz ZONE` or `$LOGR_TZ` sets the timezone for displayed dates.
-- `$LOGR_LUMA_NEAR` is a `;`-separated list of default Luma places.
+- `--tz ZONE`, then `$LOGR_TZ`, then `logr prefs set tz ZONE` sets the timezone for displayed dates.
+- `$LOGR_LUMA_NEAR` (or pref `luma_near`) is a `;`-separated list of default Luma places.
 
 ## Layout
 
@@ -62,6 +98,8 @@ src/logr/
   http.py          shared client: user agent, throttle, retries
   sources/         one connector per platform: fetch (network), parse (pure), enrich (detail page)
   dedupe.py        cross-source duplicate detection
+  tracking.py      your pipeline: status + history, notes, team, checklist, status-aware deadlines
+  searches.py      filters (themes, region, prize, team size), saved searches, preferences
   store.py         SQLite: hackathons, enrichments cache, date_changes, sync_runs
   sync.py          runs connectors and enrichment; failures are isolated per source
   cli.py           command-line interface

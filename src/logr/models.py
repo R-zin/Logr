@@ -186,9 +186,12 @@ class Hackathon(BaseModel):
             if r.kind is RoundKind.SUBMISSION and r.ends_at:
                 out.append(Deadline(f"{r.name} ends", r.ends_at, False))
         out.sort(key=lambda d: d.at)  # stable: on a tie the generic label above wins
+        # "submission due" and a submission round ending at the same instant are
+        # one deadline; registration closing at that instant is a different one.
         deduped: list[Deadline] = []
         for d in out:
-            if deduped and deduped[-1].at == d.at:
+            if (deduped and deduped[-1].at == d.at
+                    and "registration closes" not in (d.label, deduped[-1].label)):
                 continue
             deduped.append(d)
         return deduped
