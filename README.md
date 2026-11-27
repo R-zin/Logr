@@ -2,7 +2,7 @@
 
 Logr finds hackathons on Devpost, Devfolio, Unstop, Hack2skill and Luma, and tracks their registration, round and submission deadlines in one place. LinkedIn support comes later; see the roadmap.
 
-The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation), 2 (exact deadlines, round timelines and cross-source dedupe) and 3 (personal tracking, filters and saved searches) are done.
+The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation), 2 (exact deadlines, round timelines and cross-source dedupe) 3 (personal tracking, filters and saved searches) and 4 (web dashboard and API) are done.
 
 ## Quick start
 
@@ -69,6 +69,19 @@ logr list --saved blr-ai -w 14                 # saved search plus a 14-day wind
 logr prefs set default_search blr-ai           # applied to every `logr list` (--no-prefs to skip)
 ```
 
+## Web dashboard
+
+```bash
+pip install -e '.[web]'
+(cd web && npm install && npm run build)    # builds the dashboard into web/out
+logr serve                                  # http://127.0.0.1:8000, API docs at /api/docs
+```
+
+- **Pages:** Discover, hackathon detail with its round timeline, a board of your hackathons (drag cards between statuses), a calendar of your deadlines and to-dos, saved searches, and settings.
+- **Shared data:** the CLI and the dashboard use the same database, so something you track in one shows up in the other.
+- **Signing in:** by default there's no login (single user). For a shared deployment, set `LOGR_AUTH=oauth` with GitHub and/or Google OAuth credentials; see the Auth section of [`docs/API.md`](docs/API.md).
+- **More:** frontend development and the mock API are covered in [`web/README.md`](web/README.md).
+
 ## Commands
 
 | Command | What it does |
@@ -84,6 +97,7 @@ logr prefs set default_search blr-ai           # applied to every `logr list` (-
 | `logr todo UID add TEXT [--due DATE]` · `done\|undo\|rm ID` | Checklist. `--due` takes `YYYY-MM-DD` (23:59 that day) or `YYYY-MM-DD HH:MM`, in your display timezone. |
 | `logr search save NAME [filters]` · `ls` · `rm NAME` | Saved searches. Use one with `logr list --saved NAME`. |
 | `logr prefs` · `prefs set KEY VALUE` · `prefs unset KEY` | Preferences: `tz`, `luma_near`, `default_search` |
+| `logr serve [--host H] [--port P] [--static DIR]` | Run the web dashboard and JSON API. Serves `web/out` if it has been built. |
 
 Global options and environment variables:
 - `--db PATH` or `$LOGR_DB`. The default is `~/.local/share/logr/logr.db`; Phase 1 databases upgrade in place.
@@ -103,6 +117,9 @@ src/logr/
   store.py         SQLite: hackathons, enrichments cache, date_changes, sync_runs
   sync.py          runs connectors and enrichment; failures are isolated per source
   cli.py           command-line interface
+  api/             FastAPI JSON API (docs/API.md)
+  auth.py          local mode, GitHub/Google OAuth, sessions, CSRF
+web/               Next.js dashboard (static export served by `logr serve`)
 tests/             offline tests against recorded API fixtures
 ```
 
