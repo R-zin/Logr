@@ -4,6 +4,11 @@ Endpoint: POST https://api.devfolio.co/api/search/hackathons
 Body: {"type": "application_open" | "upcoming", "from": N, "size": N}
 Gives exact UTC timestamps: ``hackathon_setting.reg_starts_at/reg_ends_at``
 (applications) and ``starts_at/ends_at`` (the hack itself).
+
+Devfolio has no separate project-submission deadline in either the search or the
+detail endpoint (``/api/hackathons/<slug>`` returns the same four dates), and
+projects are submitted during the hack. So ``ends_at`` doubles as the submission
+deadline, flagged approximate. No enrichment request is needed.
 """
 
 from __future__ import annotations
@@ -65,5 +70,7 @@ class DevfolioConnector(Connector):
                 registration_opens_at=parse_dt(setting.get("reg_starts_at")),
                 registration_closes_at=parse_dt(setting.get("reg_ends_at")),
                 starts_at=parse_dt(s.get("starts_at")),
-                ends_at=parse_dt(s.get("ends_at")),
+                ends_at=(ends := parse_dt(s.get("ends_at"))),
+                submission_deadline=ends,
+                approx_fields=["submission_deadline"] if ends else [],
             )

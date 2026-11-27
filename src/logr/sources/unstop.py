@@ -4,8 +4,12 @@ Endpoint: GET https://unstop.com/api/public/opportunity/search-result
   ?opportunity=hackathons&oppstatus=open&page=N&per_page=30
 Laravel-style pagination (``data.last_page``). Registration window is in
 ``regnRequirements.start_regn_dt/end_regn_dt``; ``end_date`` is the
-opportunity's overall end. Per-round deadlines (ideation/prototype submission)
-are only on the detail endpoint — Phase 2.
+opportunity's overall end.
+
+Enrichment: GET https://unstop.com/api/public/competition/<id> returns
+``data.competition.rounds[].details[]`` with exact IST start/end per round
+(screening, ideation, prototype, finale...). Rounds flagged ``is_hidden`` are
+internal (e.g. auto-screening tied to registration) and are skipped.
 """
 
 from __future__ import annotations
@@ -13,10 +17,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from logr.models import Hackathon, Mode, Source
-from logr.sources.base import Connector, clean, parse_dt
+from logr.models import Hackathon, Mode, Round, RoundKind, Source, classify_round
+from logr.sources.base import Connector, clean, iso, parse_dt, rounds_json
 
 API = "https://unstop.com/api/public/opportunity/search-result"
+DETAIL = "https://unstop.com/api/public/competition/{id}"
 _SYMBOL = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}
 
 
@@ -34,8 +39,40 @@ def _prize(prizes: list[dict[str, Any]] | None) -> str | None:
     return " + ".join(f"{_SYMBOL.get(c, c + ' ')}{amt:,.0f}" for c, amt in by_ccy.items())
 
 
+def parse_rounds(data: dict[str, Any]) -> list[Round]:
+    comp = (data.get("data") or {}).get("competition") or {}
+    out = []
+    for r in sorted(comp.get("rounds") or [], key=lambda r: r.get("round_order") or 0):
+        if r.get("is_hidden"):
+            continue
+        for d in r.get("details") or []:
+            name = clean(d.get("title"))
+            if not name:
+                continue
+            start, end = parse_dt(d.get("start_date")), parse_dt(d.get("end_date"))
+            if start or end:
+                out.append(Round(name=name, kind=classify_round(name), starts_at=start, ends_at=end))
+    return out
+
+
+def rounds_patch(rounds: list[Round]) -> dict[str, Any]:
+    patch: dict[str, Any] = {"rounds": rounds_json(rounds)}
+    subs = [r.ends_at for r in rounds if r.kind is RoundKind.SUBMISSION and r.ends_at]
+    if subs:
+        patch["submission_deadline"] = iso(max(subs))
+    events = [r.starts_at for r in rounds if r.kind is RoundKind.EVENT and r.starts_at]
+    if events:
+        patch["starts_at"] = iso(min(events))
+    return patch
+
+
 class UnstopConnector(Connector):
     source = Source.UNSTOP
+    can_enrich = True
+
+    def enrich(self, h: Hackathon) -> dict[str, Any] | None:
+        rounds = parse_rounds(self.http.get_json(DETAIL.format(id=h.source_id)))
+        return rounds_patch(rounds) if rounds else None
 
     def fetch(self) -> Iterator[Hackathon]:
         page = 1

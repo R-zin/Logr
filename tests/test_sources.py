@@ -48,7 +48,7 @@ def test_devpost_parse():
     assert k.mode is Mode.ONLINE and k.location is None
     assert k.prize == "$100,000"
     assert k.submission_deadline == datetime(2026, 12, 4, tzinfo=timezone.utc)
-    assert k.dates_approximate
+    assert k.approx_fields == ["submission_deadline", "starts_at"]
     assert "Machine Learning/AI" in k.themes
     assert k.image_url.startswith("https://")
 
@@ -62,7 +62,10 @@ def test_devfolio_parse():
     assert "Thiruvananthapuram" in m.location
     assert m.registration_closes_at == datetime(2026, 11, 25, 18, 29, tzinfo=timezone.utc)
     assert m.starts_at == datetime(2026, 12, 9, 3, 30, tzinfo=timezone.utc)
-    assert not m.dates_approximate
+    # Devfolio submissions close when the hack ends; exact dates otherwise
+    assert m.submission_deadline == m.ends_at
+    assert m.approx_fields == ["submission_deadline"]
+    assert not m.is_approx("registration_closes_at")
 
 
 def test_unstop_parse():
@@ -95,7 +98,8 @@ def test_luma_parse_filters_non_hackathons():
     assert titles[0] == "HackwithBay 4.0"
     h = items[0]
     assert h.url.startswith("https://luma.com/")
-    assert h.registration_closes_at == h.starts_at and h.dates_approximate
+    assert h.registration_closes_at == h.starts_at
+    assert h.approx_fields == ["registration_closes_at"]  # start/end are exact
     assert h.location == "San Francisco, CA"
 
 

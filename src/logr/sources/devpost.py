@@ -2,10 +2,13 @@
 
 Endpoint: GET https://devpost.com/api/hackathons?status[]=open&status[]=upcoming&page=N
 Gives 9 per page and ``meta.total_count``. Dates are only a human string,
-``submission_period_dates`` ("Oct 30 - Dec 04, 2026"), with no time of day.
-The exact deadline lives on each hackathon page (``data-iso-date``); fetching
-that is Phase 2 enrichment. Until then we use 00:00 UTC on the final day, which
-is never later than the real deadline, and flag the dates as approximate.
+``submission_period_dates`` ("Oct 30 - Dec 04, 2026"), with no time of day, so
+the listing uses 00:00 UTC on the final day (never later than the real
+deadline) and flags it approximate.
+
+Enrichment: ``<hackathon>/details/dates`` is a server-rendered table —
+Period | Begins | Ends — whose cells carry exact ``data-iso-date`` attributes
+(Submissions, Judging, Public Voting, Winners Announced...).
 """
 
 from __future__ import annotations
@@ -16,12 +19,17 @@ from collections.abc import Iterator
 from datetime import date, datetime, time, timezone
 from typing import Any
 
-from logr.models import Hackathon, Mode, Source
-from logr.sources.base import Connector, clean
+from urllib.parse import urljoin
+
+from logr.models import Hackathon, Mode, Round, RoundKind, Source, classify_round
+from logr.sources.base import Connector, clean, iso, parse_dt, rounds_json
 
 API = "https://devpost.com/api/hackathons"
 
 _MON = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+_ROW = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S)
+_CELL = re.compile(r"<td([^>]*)>(.*?)</td>", re.S)
+_ISO = re.compile(r'data-iso-date="([^"]+)"')
 _PART = re.compile(r"^(?:(?P<mon>[A-Za-z]{3})\s+)?(?P<day>\d{1,2})(?:,\s*(?P<year>\d{4}))?$")
 
 
@@ -53,6 +61,36 @@ def parse_period(text: str | None) -> tuple[date, date] | None:
     return start, end
 
 
+def parse_dates_page(page: str) -> list[Round]:
+    """Rows of the /details/dates table → rounds. Rows without dates are skipped."""
+    rounds = []
+    for row in _ROW.findall(page):
+        cells = _CELL.findall(row)
+        if len(cells) < 2:
+            continue
+        name = clean(html.unescape(re.sub(r"<[^>]+>", "", cells[0][1])))
+        dates = [parse_dt(m.group(1)) if (m := _ISO.search(attrs)) else None for attrs, _ in cells[1:3]]
+        begins, ends = (dates + [None])[:2]
+        if not name or not (begins or ends):
+            continue
+        rounds.append(Round(name=name, kind=classify_round(name), starts_at=begins, ends_at=ends))
+    return rounds
+
+
+def dates_patch(rounds: list[Round]) -> dict[str, Any]:
+    patch: dict[str, Any] = {"rounds": rounds_json(rounds)}
+    subs = [r for r in rounds if r.kind is RoundKind.SUBMISSION]
+    if subs:
+        if subs[0].starts_at:
+            patch["starts_at"] = iso(subs[0].starts_at)
+        if subs[-1].ends_at:
+            patch["submission_deadline"] = iso(subs[-1].ends_at)
+    regs = [r for r in rounds if r.kind is RoundKind.REGISTRATION and r.ends_at]
+    if regs:
+        patch["registration_closes_at"] = iso(regs[-1].ends_at)
+    return patch
+
+
 def _prize(raw: Any) -> str | None:
     if not raw:
         return None
@@ -68,6 +106,12 @@ def _url(u: str | None) -> str | None:
 
 class DevpostConnector(Connector):
     source = Source.DEVPOST
+    can_enrich = True
+
+    def enrich(self, h: Hackathon) -> dict[str, Any] | None:
+        page = self.http.get_text(urljoin(h.url if h.url.endswith("/") else h.url + "/", "details/dates"))
+        rounds = parse_dates_page(page)
+        return dates_patch(rounds) if rounds else None
 
     def fetch(self) -> Iterator[Hackathon]:
         page = 1
@@ -110,5 +154,5 @@ class DevpostConnector(Connector):
                 image_url=_url(h.get("thumbnail_url")),
                 starts_at=start,
                 submission_deadline=end,
-                dates_approximate=True,
+                approx_fields=["starts_at", "submission_deadline"],
             )

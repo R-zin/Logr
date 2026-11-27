@@ -1,0 +1,58 @@
+{
+ "data": {
+  "status": true,
+  "competition": {
+   "id": 1818639,
+   "title": "Rajasthan Police Hackathon 2026",
+   "start_date": "2026-11-19T00:00:00+05:30",
+   "end_date": "2026-12-29T16:00:00+05:30",
+   "rounds": [
+    {
+     "id": 1702066,
+     "round_order": 1,
+     "subtype": "screening",
+     "is_hidden": 1,
+     "details": [
+      {
+       "id": 921553,
+       "title": "Application Screening",
+       "start_date": "2026-11-19T00:00:00+05:30",
+       "end_date": "2026-11-24T23:59:00+05:30",
+       "status": "FINISHED"
+      }
+     ]
+    },
+    {
+     "id": 1699639,
+     "round_order": 2,
+     "subtype": null,
+     "is_hidden": 0,
+     "details": [
+      {
+       "id": 919400,
+       "title": " Screening Round ",
+       "start_date": "2026-11-19T06:37:00+05:30",
+       "end_date": "2026-11-24T23:59:00+05:30",
+       "status": "FINISHED"
+      }
+     ]
+    },
+    {
+     "id": 1699641,
+     "round_order": 3,
+     "subtype": null,
+     "is_hidden": 0,
+     "details": [
+      {
+       "id": 1439423,
+       "title": "Offline Hackathon ",
+       "start_date": "2026-11-28T10:00:00+05:30",
+       "end_date": "2026-12-29T16:00:00+05:30",
+       "status": "NOT_STARTED"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
