@@ -5,3 +5,7 @@ __pycache__/
 .venv/
 build/
 dist/
+web/node_modules/
+web/.next/
+web/out/
+web/next-env.d.ts

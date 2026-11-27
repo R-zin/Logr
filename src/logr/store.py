@@ -111,8 +111,13 @@ class Store:
     def __init__(self, path: str | Path) -> None:
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path))
+        # check_same_thread=False: the web server may open a Store in one worker
+        # thread and use it in another; each request gets its own Store.
+        self.db = sqlite3.connect(str(path), timeout=30, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        if str(path) != ":memory:":
+            # WAL lets the web server read while a sync writes.
+            self.db.execute("PRAGMA journal_mode=WAL")
         self._migrate()
 
     def _migrate(self) -> None:

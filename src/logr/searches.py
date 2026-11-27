@@ -354,8 +354,9 @@ def _norm_name(name: str) -> str:
 
 
 class SavedSearches:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, user_id: str = LOCAL_USER) -> None:
         """Create table if missing."""
+        self.user_id = user_id
         self.db = db
         with self.db:
             self.db.execute(
@@ -379,13 +380,13 @@ class SavedSearches:
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO saved_searches (user_id, name, filter, updated_at) VALUES (?,?,?,?)",
-                (LOCAL_USER, key, blob, _now_iso()),
+                (self.user_id, key, blob, _now_iso()),
             )
 
     def get(self, name: str) -> Filter | None:
         row = self.db.execute(
             "SELECT filter FROM saved_searches WHERE user_id = ? AND name = ?",
-            (LOCAL_USER, _norm_name(name)),
+            (self.user_id, _norm_name(name)),
         ).fetchone()
         return Filter.from_dict(json.loads(row[0])) if row else None
 
@@ -393,7 +394,7 @@ class SavedSearches:
         """Sorted by name."""
         rows = self.db.execute(
             "SELECT name, filter FROM saved_searches WHERE user_id = ? ORDER BY name",
-            (LOCAL_USER,),
+            (self.user_id,),
         ).fetchall()
         return [(r[0], Filter.from_dict(json.loads(r[1]))) for r in rows]
 
@@ -401,7 +402,7 @@ class SavedSearches:
         with self.db:
             cur = self.db.execute(
                 "DELETE FROM saved_searches WHERE user_id = ? AND name = ?",
-                (LOCAL_USER, _norm_name(name)),
+                (self.user_id, _norm_name(name)),
             )
         return cur.rowcount > 0
 
@@ -415,8 +416,9 @@ PREF_KEYS: dict[str, str] = {
 
 
 class Preferences:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, user_id: str = LOCAL_USER) -> None:
         """Create table if missing."""
+        self.user_id = user_id
         self.db = db
         with self.db:
             self.db.execute(
@@ -430,7 +432,7 @@ class Preferences:
 
     def get(self, key: str) -> str | None:
         row = self.db.execute(
-            "SELECT value FROM preferences WHERE user_id = ? AND key = ?", (LOCAL_USER, key),
+            "SELECT value FROM preferences WHERE user_id = ? AND key = ?", (self.user_id, key),
         ).fetchone()
         return row[0] if row else None
 
@@ -441,18 +443,18 @@ class Preferences:
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO preferences (user_id, key, value, updated_at) VALUES (?,?,?,?)",
-                (LOCAL_USER, key, str(value), _now_iso()),
+                (self.user_id, key, str(value), _now_iso()),
             )
 
     def unset(self, key: str) -> bool:
         with self.db:
             cur = self.db.execute(
-                "DELETE FROM preferences WHERE user_id = ? AND key = ?", (LOCAL_USER, key),
+                "DELETE FROM preferences WHERE user_id = ? AND key = ?", (self.user_id, key),
             )
         return cur.rowcount > 0
 
     def all(self) -> dict[str, str]:
         rows = self.db.execute(
-            "SELECT key, value FROM preferences WHERE user_id = ? ORDER BY key", (LOCAL_USER,),
+            "SELECT key, value FROM preferences WHERE user_id = ? ORDER BY key", (self.user_id,),
         ).fetchall()
         return {r[0]: r[1] for r in rows}
