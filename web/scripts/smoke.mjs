@@ -8,6 +8,7 @@ const { chromium } = createRequire(import.meta.url)("playwright");
 const B = process.argv[2] || "http://127.0.0.1:8000";
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+page.setDefaultTimeout(10_000); // a broken page should fail fast, not hang for 30s
 const problems = [];
 page.on("console", (m) => m.type() === "error" && problems.push("console: " + m.text()));
 page.on("response", (r) => {
