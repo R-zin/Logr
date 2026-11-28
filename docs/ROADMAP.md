@@ -74,10 +74,31 @@ Each source was tested from a server with plain HTTPS requests. Everything in th
 
 **Done when:** you can track a hackathon, move it through the pipeline, and `logr mine` shows the next action per hackathon in your timezone. Met: 217 tests pass, and the commands were checked against live data.
 
-### Phase 4: API and web dashboard
-- FastAPI service over the same store (move to Postgres here), with OpenAPI docs
-- Next.js dashboard with a deadline timeline, a calendar view, discovery filters, a Kanban board of tracked hackathons, and deadline-change badges
-- Auth (OAuth with GitHub or Google)
+### Phase 4: API and web dashboard ✅
+- **JSON API** (`logr/api/`, FastAPI). The contract is [`docs/API.md`](API.md), and interactive docs are served at `/api/docs`. It covers:
+  - listings with every CLI filter, cross-source merging, saved and default searches, sorting by prize, and pagination;
+  - hackathon detail with rounds, date changes and your tracking;
+  - a calendar feed, status-aware for tracked hackathons;
+  - the full tracking lifecycle, saved searches and preferences;
+  - an admin-only background sync.
+- **Web dashboard** (`web/`, Next.js 15 static export + Tailwind, served by the same process at `/`):
+  - **Discover:** filters kept in the URL; urgency and approximate dates marked.
+  - **Hackathon detail:** round timeline, date-change history, tracking panel.
+  - **My hackathons:** a Kanban board, with drag-and-drop or a status menu on each card for keyboard users.
+  - **Calendar:** month view, or an agenda list on phones.
+  - **Saved searches** and **Settings**, including sync status and "Sync now".
+
+  Light and dark mode, and usable at 360px.
+- **Auth** (`logr/auth.py`):
+  - **`LOGR_AUTH=local`** (the default): no login, and you share data with the CLI.
+  - **`LOGR_AUTH=oauth`:** sign in with GitHub and/or Google. Sessions use a signed HttpOnly cookie, the OAuth state is tied to the provider, `next` redirects are restricted to safe paths, and every non-GET request needs a CSRF header.
+
+  Tracking, saved searches and preferences are per user. Phase 3 reserved the `user_id` column, so no data migration was needed.
+- **One process:** `logr serve` runs the API and the dashboard together. `web/scripts/smoke.mjs` is an end-to-end browser check against a running server.
+- **Storage stays SQLite** (WAL mode, one connection per request). Postgres, planned here originally, moves to Phase 6. For a personal or small-team deployment, one SQLite file is simpler to run and back up, and the store layer is SQLite-specific, so swapping it is a separate piece of work. Nothing the dashboard needs depends on it.
+- Built by three parallel agents (API, auth, dashboard) against contracts written first. Next.js was upgraded from 15.1.6 to 15.5.29 and PostCSS pinned to 8.5.34, so `npm audit` reports 0 vulnerabilities.
+
+**Done when:** you can find, track and manage hackathons in a browser, with the same data as the CLI. Met: 284 Python tests pass, the dashboard type-checks and builds, and a browser end-to-end run against the real server on live data passed (Discover, filters, detail, adding a to-do, moving a board card, calendar, settings) with no console errors or failed API calls.
 
 ### Phase 5: Scheduling and reminders
 - Scheduled sync (cron, APScheduler or a GitHub Action) every 6 hours. A full enriched sync takes about 3–4 min, because detail requests are spaced 0.5 s apart. Also health alerts when a connector starts returning 0 results or errors (a sign the endpoint changed)
@@ -90,3 +111,4 @@ Each source was tested from a server with plain HTTPS requests. Everything in th
 - Hack2skill event pages through the same extractor: on demand, for tracked events only, since their structured API needs a login
 - Recommendations: rank open hackathons by your skills and past participation
 - Hardening: per-source contract tests on a schedule, monitoring, rate-limit budgets, and a terms-of-service review before any public launch
+- Postgres as an optional backend for multi-user hosting (deferred from Phase 4); server-side session revocation

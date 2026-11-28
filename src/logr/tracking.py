@@ -149,8 +149,9 @@ class Tracker:
     (except ``track``) and return the updated ``Tracked``. Writes are committed
     immediately."""
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: sqlite3.Connection, user_id: str = LOCAL_USER) -> None:
         """Create tables if missing (CREATE TABLE IF NOT EXISTS ...)."""
+        self.user_id = user_id
         self.db = db
         self.db.executescript(_SCHEMA)
         self.db.commit()
@@ -159,7 +160,7 @@ class Tracker:
 
     def _exists(self, uid: str) -> bool:
         return self.db.execute("SELECT 1 FROM tracked WHERE user_id=? AND uid=?",
-                               (LOCAL_USER, uid)).fetchone() is not None
+                               (self.user_id, uid)).fetchone() is not None
 
     def _require(self, uid: str) -> None:
         if not self._exists(uid):
@@ -168,7 +169,7 @@ class Tracker:
     def _touch(self, uid: str) -> None:
         """Bump ``updated_at``. Call inside the mutation's transaction."""
         self.db.execute("UPDATE tracked SET updated_at=? WHERE user_id=? AND uid=?",
-                        (_iso(utcnow()), LOCAL_USER, uid))
+                        (_iso(utcnow()), self.user_id, uid))
 
     def _get_or_raise(self, uid: str) -> Tracked:
         t = self.get(uid)
@@ -179,7 +180,7 @@ class Tracker:
     def _require_item(self, uid: str, item_id: int) -> None:
         self._require(uid)
         row = self.db.execute("SELECT 1 FROM tracked_checklist WHERE user_id=? AND uid=? AND id=?",
-                              (LOCAL_USER, uid, item_id)).fetchone()
+                              (self.user_id, uid, item_id)).fetchone()
         if row is None:
             raise KeyError(item_id)
 
@@ -194,36 +195,36 @@ class Tracker:
                 self.db.execute(
                     "INSERT INTO tracked (user_id, uid, status, added_at, updated_at, notes, repo_url)"
                     " VALUES (?,?,?,?,?,'',NULL)",
-                    (LOCAL_USER, uid, status.value, now, now))
+                    (self.user_id, uid, status.value, now, now))
                 self.db.execute(
                     "INSERT INTO tracked_status_history (user_id, uid, old_status, new_status, changed_at, note)"
                     " VALUES (?,?,NULL,?,?,NULL)",
-                    (LOCAL_USER, uid, status.value, now))
+                    (self.user_id, uid, status.value, now))
         return self._get_or_raise(uid)
 
     def untrack(self, uid: str) -> bool:
         """Delete the tracking record and everything attached. False if it wasn't tracked."""
         with self.db:
-            cur = self.db.execute("DELETE FROM tracked WHERE user_id=? AND uid=?", (LOCAL_USER, uid))
+            cur = self.db.execute("DELETE FROM tracked WHERE user_id=? AND uid=?", (self.user_id, uid))
             for table in ("tracked_status_history", "tracked_team", "tracked_checklist"):
-                self.db.execute(f"DELETE FROM {table} WHERE user_id=? AND uid=?", (LOCAL_USER, uid))
+                self.db.execute(f"DELETE FROM {table} WHERE user_id=? AND uid=?", (self.user_id, uid))
         return cur.rowcount > 0
 
     def get(self, uid: str) -> Tracked | None:
         row = self.db.execute(
             "SELECT uid, status, added_at, updated_at, notes, repo_url FROM tracked WHERE user_id=? AND uid=?",
-            (LOCAL_USER, uid)).fetchone()
+            (self.user_id, uid)).fetchone()
         return self._build(row) if row is not None else None
 
     def _build(self, row: sqlite3.Row | tuple) -> Tracked:
         uid, status, added_at, updated_at, notes, repo_url = tuple(row)
         team = [r[0] for r in self.db.execute(
-            "SELECT name FROM tracked_team WHERE user_id=? AND uid=? ORDER BY id", (LOCAL_USER, uid))]
+            "SELECT name FROM tracked_team WHERE user_id=? AND uid=? ORDER BY id", (self.user_id, uid))]
         checklist = [
             ChecklistItem(id=int(i), text=text, done=bool(done), due_at=_dt_opt(due))
             for i, text, done, due in (tuple(r) for r in self.db.execute(
                 "SELECT id, text, done, due_at FROM tracked_checklist WHERE user_id=? AND uid=? ORDER BY id",
-                (LOCAL_USER, uid)))
+                (self.user_id, uid)))
         ]
         return Tracked(uid=uid, status=Status(status), added_at=_dt(added_at), updated_at=_dt(updated_at),
                        notes=notes or "", repo_url=repo_url, team=team, checklist=checklist)
@@ -231,7 +232,7 @@ class Tracker:
     def all(self, statuses: Iterable[Status] | None = None) -> list[Tracked]:
         """Every tracked hackathon (optionally only these statuses), oldest added first."""
         sql = "SELECT uid, status, added_at, updated_at, notes, repo_url FROM tracked WHERE user_id=?"
-        args: list[str] = [LOCAL_USER]
+        args: list[str] = [self.user_id]
         if statuses is not None:
             wanted = sorted({Status(s).value for s in statuses})
             if not wanted:
@@ -253,18 +254,18 @@ class Tracker:
         now = _iso(utcnow())
         with self.db:
             self.db.execute("UPDATE tracked SET status=?, updated_at=? WHERE user_id=? AND uid=?",
-                            (status.value, now, LOCAL_USER, uid))
+                            (status.value, now, self.user_id, uid))
             self.db.execute(
                 "INSERT INTO tracked_status_history (user_id, uid, old_status, new_status, changed_at, note)"
                 " VALUES (?,?,?,?,?,?)",
-                (LOCAL_USER, uid, cur.status.value, status.value, now, note))
+                (self.user_id, uid, cur.status.value, status.value, now, note))
         return self._get_or_raise(uid)
 
     def history(self, uid: str) -> list[StatusChange]:
         """Oldest first. Empty list if not tracked."""
         rows = self.db.execute(
             "SELECT old_status, new_status, changed_at, note FROM tracked_status_history"
-            " WHERE user_id=? AND uid=? ORDER BY id", (LOCAL_USER, uid)).fetchall()
+            " WHERE user_id=? AND uid=? ORDER BY id", (self.user_id, uid)).fetchall()
         return [StatusChange(old=Status(o) if o is not None else None, new=Status(n), changed_at=_dt(at), note=note)
                 for o, n, at, note in (tuple(r) for r in rows)]
 
@@ -273,11 +274,11 @@ class Tracker:
         self._require(uid)
         when = _aware_utc(now, "now") if now is not None else utcnow()
         line = f"[{when:%Y-%m-%d %H:%M} UTC] {text.strip()}"
-        row = self.db.execute("SELECT notes FROM tracked WHERE user_id=? AND uid=?", (LOCAL_USER, uid)).fetchone()
+        row = self.db.execute("SELECT notes FROM tracked WHERE user_id=? AND uid=?", (self.user_id, uid)).fetchone()
         existing = row[0] or ""
         notes = f"{existing}\n{line}" if existing else line
         with self.db:
-            self.db.execute("UPDATE tracked SET notes=? WHERE user_id=? AND uid=?", (notes, LOCAL_USER, uid))
+            self.db.execute("UPDATE tracked SET notes=? WHERE user_id=? AND uid=?", (notes, self.user_id, uid))
             self._touch(uid)
         return self._get_or_raise(uid)
 
@@ -285,7 +286,7 @@ class Tracker:
         self._require(uid)
         url = (url or "").strip() or None
         with self.db:
-            self.db.execute("UPDATE tracked SET repo_url=? WHERE user_id=? AND uid=?", (url, LOCAL_USER, uid))
+            self.db.execute("UPDATE tracked SET repo_url=? WHERE user_id=? AND uid=?", (url, self.user_id, uid))
             self._touch(uid)
         return self._get_or_raise(uid)
 
@@ -298,11 +299,11 @@ class Tracker:
         self._require(uid)
         key = name.casefold()
         dup = self.db.execute("SELECT 1 FROM tracked_team WHERE user_id=? AND uid=? AND name_key=?",
-                              (LOCAL_USER, uid, key)).fetchone()
+                              (self.user_id, uid, key)).fetchone()
         if dup is None:
             with self.db:
                 self.db.execute("INSERT INTO tracked_team (user_id, uid, name, name_key) VALUES (?,?,?,?)",
-                                (LOCAL_USER, uid, name, key))
+                                (self.user_id, uid, name, key))
                 self._touch(uid)
         return self._get_or_raise(uid)
 
@@ -312,7 +313,7 @@ class Tracker:
         key = (name or "").strip().casefold()
         with self.db:
             cur = self.db.execute("DELETE FROM tracked_team WHERE user_id=? AND uid=? AND name_key=?",
-                                  (LOCAL_USER, uid, key))
+                                  (self.user_id, uid, key))
             if cur.rowcount == 0:
                 raise ValueError(f"{name!r} is not on the team")
             self._touch(uid)
@@ -328,7 +329,7 @@ class Tracker:
         with self.db:
             cur = self.db.execute(
                 "INSERT INTO tracked_checklist (user_id, uid, text, done, due_at) VALUES (?,?,?,0,?)",
-                (LOCAL_USER, uid, text, _iso_opt(due)))
+                (self.user_id, uid, text, _iso_opt(due)))
             self._touch(uid)
         return ChecklistItem(id=int(cur.lastrowid), text=text, done=False, due_at=due)
 
@@ -337,7 +338,7 @@ class Tracker:
         self._require_item(uid, item_id)
         with self.db:
             self.db.execute("UPDATE tracked_checklist SET done=? WHERE user_id=? AND uid=? AND id=?",
-                            (int(bool(done)), LOCAL_USER, uid, item_id))
+                            (int(bool(done)), self.user_id, uid, item_id))
             self._touch(uid)
         return self._get_or_raise(uid)
 
@@ -346,7 +347,7 @@ class Tracker:
         self._require_item(uid, item_id)
         with self.db:
             self.db.execute("DELETE FROM tracked_checklist WHERE user_id=? AND uid=? AND id=?",
-                            (LOCAL_USER, uid, item_id))
+                            (self.user_id, uid, item_id))
             self._touch(uid)
         return self._get_or_raise(uid)
 

@@ -404,6 +404,23 @@ def cmd_show(args: argparse.Namespace, ctx: Ctx) -> int:
     return 0
 
 
+DEFAULT_WEB_DIR = Path(__file__).resolve().parents[2] / "web" / "out"
+
+
+def cmd_serve(args: argparse.Namespace, ctx: Ctx) -> int:
+    try:
+        from logr.api import run  # needs the [web] extra
+    except ImportError as exc:
+        raise CliError(f"the web server needs extra packages: pip install -e '.[web]' ({exc.name} missing)") from None
+    static = args.static or (DEFAULT_WEB_DIR if DEFAULT_WEB_DIR.is_dir() else None)
+    if static is None:
+        print("note: no built dashboard found (web/out); serving the API only. "
+              "Build it with: cd web && npm install && npm run build", file=sys.stderr)
+    ctx.store.close()  # the server opens its own connection per request
+    run(args.db, host=args.host, port=args.port, static_dir=static)
+    return 0
+
+
 def cmd_status(args: argparse.Namespace, ctx: Ctx) -> int:
     runs = ctx.store.last_runs()
     if not runs:
@@ -693,6 +710,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("status", help="last sync result per source")
     st.set_defaults(fn=cmd_status)
+
+    sv = sub.add_parser("serve", help="run the web dashboard and JSON API")
+    sv.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument("--static", type=Path, metavar="DIR",
+                    help="built dashboard to serve at / (default web/out if present)")
+    sv.set_defaults(fn=cmd_serve)
 
     # tracking
     tr = sub.add_parser("track", help="start tracking a hackathon")
