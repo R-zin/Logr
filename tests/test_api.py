@@ -15,6 +15,7 @@ from logr.api import create_app
 from logr.api import sync as api_sync
 from logr.auth import AuthConfig, OAuthProvider, User
 from logr.models import Hackathon, Mode, Round, Source
+from logr.searches import PREF_KEYS
 from logr.store import Store
 
 H = {"X-Requested-With": "logr"}
@@ -441,7 +442,7 @@ def test_prefs(client):
     r = client.get("/api/prefs")
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"tz", "luma_near", "default_search"}
+    assert set(body) == set(PREF_KEYS)
     assert body["tz"]["value"] is None and body["tz"]["description"]
 
     assert client.put("/api/prefs/tz", json={"value": "Asia/Kolkata"}, headers=H).status_code == 200

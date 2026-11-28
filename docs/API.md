@@ -103,3 +103,16 @@ Any of these on a uid that isn't tracked returns 404.
 | `GET /api/prefs` | — | `{"<key>": {"value": str\|null, "description": str}}` for every key in `PREF_KEYS` |
 | `PUT /api/prefs/{key}` | `{"value"}` | 200. Validated like `logr prefs set`; 400 if invalid, 404 for an unknown key. |
 | `DELETE /api/prefs/{key}` | — | 204 |
+
+## Notifications and calendar feed (Phase 5)
+Behaviour is defined in `logr/notify.py` and `logr/ics.py`.
+
+| Method & path | Auth | Response |
+|---|---|---|
+| `GET /api/calendar.ics?token=…` | the token is the credential (no cookie) | `text/calendar; charset=utf-8`, the user's `ics.tracked_events`, with `Cache-Control: private, max-age=300`. A missing or unknown token returns 404 (not 401, so token guessing learns nothing). |
+| `GET /api/feed` | signed in | `{"url": "<base>/api/calendar.ics?token=…", "webcal_url": "webcal://…"}`. Creates the token on first call. `<base>` is `LOGR_BASE_URL` if set, else the request's own origin. |
+| `POST /api/feed/rotate` | signed in | Same shape as `GET /api/feed`, with a new token; the old URL stops working. |
+| `GET /api/notify` | signed in | `{"channels": {"email": Ch, "telegram": Ch, "discord": Ch}, "remind_offsets": "7d,1d,3h", "last_pass_at": "…Z"\|null}`. `Ch` = `{"configured": bool, "available": bool, "destination": str\|null}`: `configured` means the user set the pref, `available` means the server has the credentials needed (SMTP, bot token; always true for Discord), and `destination` is the address or chat id. The Discord webhook is masked with `notify.mask_secret`. |
+| `POST /api/notify/test` | signed in | `{"results": {"email": "ok" \| "<error>", ...}}` from `notify.send_test`. 400 if the user has no channel configured. |
+
+**Preferences.** Four new keys are set via the existing `PUT /api/prefs/{key}`: `notify_email`, `notify_telegram_chat`, `notify_discord_webhook` and `remind_offsets`. They are validated with `notify.validate_pref`, and an invalid value returns 400 with its message. `GET /api/prefs` masks any key in `searches.SECRET_PREF_KEYS` (currently the Discord webhook) using `notify.mask_secret`. A masked value is never written back: a `PUT` whose value equals the masked form returns 400 with `{"detail": "enter the full webhook URL"}`.
