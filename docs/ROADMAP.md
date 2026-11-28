@@ -100,10 +100,37 @@ Each source was tested from a server with plain HTTPS requests. Everything in th
 
 **Done when:** you can find, track and manage hackathons in a browser, with the same data as the CLI. Met: 284 Python tests pass, the dashboard type-checks and builds, and a browser end-to-end run against the real server on live data passed (Discover, filters, detail, adding a to-do, moving a board card, calendar, settings) with no console errors or failed API calls.
 
-### Phase 5: Scheduling and reminders
-- Scheduled sync (cron, APScheduler or a GitHub Action) every 6 hours. A full enriched sync takes about 3–4 min, because detail requests are spaced 0.5 s apart. Also health alerts when a connector starts returning 0 results or errors (a sign the endpoint changed)
-- Reminders 7 days, 1 day and 3 hours before each tracked deadline by email, Telegram or Discord, plus "deadline moved" alerts built on `date_changes`
-- An ICS feed of tracked hackathons, so Google Calendar or Apple Calendar can subscribe, and optional direct Google Calendar sync
+### Phase 5: Scheduling and reminders ✅
+- **Scheduler** (`logr/scheduler.py`):
+  - Syncs every 6 hours and runs a reminder pass every 15 minutes, either inside the web server (`logr serve --schedule`) or on its own (`logr daemon`).
+  - The two jobs never overlap, and an error in one doesn't stop the other.
+  - The last successful run of each job is saved, so a restart doesn't re-sync straight away.
+- **Reminders** (`logr/notify.py`) go out by email (SMTP), Telegram or Discord.
+  - **Timing:** 7 days, 1 day and 3 hours before each deadline, adjustable with the `remind_offsets` pref.
+  - **Status-aware:** registration reminders stop once you're registered, and finished hackathons go quiet. To-dos with due dates get reminders too.
+  - **No burst:** if several reminder times are already due, only the nearest is sent, so tracking a hackathon 2 hours before its deadline gives one message, not three.
+  - **Restart on move:** a moved deadline restarts its reminders.
+  - **Countdowns round down,** so a reminder never overstates the time left. The first live run said "7 days" for 6 days 14 hours; that was fixed and now has a test.
+- **"Deadline moved" alerts** come from the `date_changes` history, e.g. "submission due moved from 5 Dec to 10 Dec IST (extended by 5d)".
+- **Sync-health alerts for admins:** a source that errors, a source that suddenly returns 0 results (its endpoint probably changed), or no successful sync in 24 hours.
+- **Delivery is idempotent:**
+  - A send log records each (message, channel) pair, so nothing is sent twice.
+  - If one channel fails, only that channel retries.
+  - Moved alerts are queued for up to 7 days until they get through.
+- **Secrets stay hidden.** The Telegram bot token, the Discord webhook and the SMTP password never appear in errors, logs or the API. httpx's request logging is scrubbed, and the webhook is masked in preferences.
+- **Calendar subscription** (`logr/ics.py`):
+  - An RFC 5545 feed of your deadlines, to-dos and event spans, with alarms, at a private URL you can rotate (`/api/calendar.ics?token=…`, `logr feed-url`, or Settings in the dashboard).
+  - Google Calendar, Apple Calendar and Outlook can all subscribe to it, which replaces the direct Google Calendar sync originally planned.
+  - Deadlines are written as instants with no end time, as the standard requires.
+- **Dashboard Settings:** set up your notification channels, send a test notification, and get or reset your calendar link.
+- **Commands:** `logr notify [--dry-run|--test]`, `logr ics`, `logr feed-url`, `logr daemon`, `logr serve --schedule`.
+- **Deployment guide:** [`docs/DEPLOY.md`](DEPLOY.md) covers systemd, cron, every `LOGR_*` variable, and how to get a Telegram chat id or a Discord webhook.
+- Built by four parallel agents (notifications, calendar feed + API, scheduler + CLI, dashboard) against contracts written first.
+
+**Done when:** a tracked deadline produces a reminder through a real channel, a moved deadline produces an alert, and the calendar subscribes. Met:
+- **Real email path:** reminders, a moved alert, a health alert and a test sent from the dashboard all arrived at a real local SMTP server (aiosmtpd), and repeat passes sent nothing.
+- **Calendar:** the feed, served and from the CLI, parses with the independent `icalendar` library, with every line within 75 octets.
+- **Tests:** 466 pass on Python 3.11 and 3.13.
 
 ### Phase 6: LinkedIn ingestion and smart features
 - LinkedIn through user input only: paste a post URL or text, use a browser-extension "save to Logr" button, or forward notification emails. An LLM extracts title, dates and URL into the `Hackathon` model, with a confidence score and a human confirmation step.
