@@ -412,7 +412,15 @@ PREF_KEYS: dict[str, str] = {
     "tz": "IANA timezone for displayed dates (used when --tz and $LOGR_TZ are absent)",
     "luma_near": "';'-separated Luma places for sync (used when --luma-near and $LOGR_LUMA_NEAR are absent)",
     "default_search": "saved search applied by `logr list` unless --saved or --no-prefs is given",
+    # Phase 5 — validated by logr.notify.validate_pref
+    "notify_email": "email address for deadline reminders",
+    "notify_telegram_chat": "Telegram chat id for reminders (message the bot first; numeric id or @channel)",
+    "notify_discord_webhook": "Discord webhook URL for reminders (secret: shown masked)",
+    "remind_offsets": "when to remind before each deadline, e.g. 7d,1d,3h (default)",
 }
+
+# Pref values that are secrets: display layers show them masked.
+SECRET_PREF_KEYS: frozenset[str] = frozenset({"notify_discord_webhook"})
 
 
 class Preferences:

@@ -132,3 +132,21 @@ export const IconGoogle = (p: P) => (
     <path fill="#EA4335" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.8-2.8A10 10 0 003.1 7.4L6.4 10C7.2 7.8 9.4 6 12 6z" />
   </svg>
 );
+export const IconCopy = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" />
+  </svg>
+);
+export const IconBell = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M6 9a6 6 0 1 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9z" />
+    <path d="M10 19a2 2 0 0 0 4 0" />
+  </svg>
+);
+export const IconAlert = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 4l9 16H3z" />
+    <path d="M12 10v4.5M12 17.5v.01" />
+  </svg>
+);

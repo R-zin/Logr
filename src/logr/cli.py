@@ -3,6 +3,7 @@
 Discovery: ``logr sync``, ``logr list``, ``logr show``, ``logr status`` (sync status).
 Tracking: ``logr track/untrack/mark/mine/note/repo/team/todo``.
 Saved searches and preferences: ``logr search ...``, ``logr prefs ...``.
+Reminders and calendar: ``logr notify``, ``logr daemon``, ``logr ics``, ``logr feed-url``.
 """
 
 from __future__ import annotations
@@ -10,16 +11,21 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import os
+import signal
 import sys
+import threading
 from datetime import datetime, timedelta, timezone, tzinfo
 from functools import cached_property
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from logr import ics, notify
 from logr.dedupe import Listing, group
 from logr.models import Hackathon, Mode, Source, utcnow
-from logr.searches import PREF_KEYS, Filter, Preferences, SavedSearches
+from logr.scheduler import Scheduler, resolve_admins
+from logr.searches import LOCAL_USER, PREF_KEYS, SECRET_PREF_KEYS, Filter, Preferences, SavedSearches
 from logr.sources import CONNECTORS
 from logr.sources.luma import resolve_place
 from logr.store import Store
@@ -417,7 +423,145 @@ def cmd_serve(args: argparse.Namespace, ctx: Ctx) -> int:
         print("note: no built dashboard found (web/out); serving the API only. "
               "Build it with: cd web && npm install && npm run build", file=sys.stderr)
     ctx.store.close()  # the server opens its own connection per request
-    run(args.db, host=args.host, port=args.port, static_dir=static)
+    sched = _make_scheduler(args) if args.schedule else None
+    if sched is not None:
+        _setup_logging()
+        sched.start()
+    try:
+        run(args.db, host=args.host, port=args.port, static_dir=static)
+    finally:
+        if sched is not None:
+            sched.stop(timeout=10)
+    return 0
+
+
+# --- scheduler, notifications, calendar ---------------------------------------
+
+
+def _setup_logging() -> None:
+    root = logging.getLogger("logr")
+    if not root.handlers:
+        h = logging.StreamHandler(sys.stderr)
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root.addHandler(h)
+        root.setLevel(logging.INFO)
+
+
+def _notifier_config() -> notify.NotifierConfig:
+    try:
+        return notify.NotifierConfig.from_env()
+    except ValueError as exc:
+        raise CliError(f"bad notification settings: {exc}", 2) from None
+
+
+def _admins() -> list[str]:
+    try:
+        return resolve_admins()
+    except ValueError as exc:
+        raise CliError(f"bad auth settings: {exc}", 2) from None
+
+
+def _make_scheduler(args: argparse.Namespace) -> Scheduler:
+    _notifier_config()  # fail fast on a bad LOGR_SMTP_PORT etc.
+    _admins()
+    return Scheduler(args.db, sync_every=timedelta(hours=args.sync_every),
+                     notify_every=timedelta(minutes=args.notify_every))
+
+
+def _wait_for_shutdown() -> None:
+    """Block until SIGINT/SIGTERM (or Ctrl-C)."""
+    done = threading.Event()
+    old: dict[int, object] = {}
+    if threading.current_thread() is threading.main_thread():
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            old[sig] = signal.signal(sig, lambda *_: done.set())
+    try:
+        while not done.wait(1.0):
+            pass
+    except KeyboardInterrupt:
+        pass
+    finally:
+        for sig, h in old.items():
+            signal.signal(sig, h)
+
+
+def cmd_daemon(args: argparse.Namespace, ctx: Ctx) -> int:
+    ctx.store.close()  # each job opens its own Store
+    sched = _make_scheduler(args)
+    _setup_logging()
+    sched.start()
+    print(f"logr daemon: syncing every {args.sync_every:g}h, notifying every {args.notify_every:g}min "
+          f"(db {args.db}). Ctrl-C to stop.", file=sys.stderr)
+    try:
+        _wait_for_shutdown()
+    finally:
+        print("logr daemon: shutting down...", file=sys.stderr)
+        if not sched.stop(timeout=30):
+            print("logr daemon: a job is still running; exiting anyway", file=sys.stderr)
+    return 0
+
+
+def cmd_notify(args: argparse.Namespace, ctx: Ctx) -> int:
+    config = _notifier_config()
+    if args.test:
+        if args.dry_run:
+            raise CliError("--test and --dry-run can't be combined", 2)
+        results = notify.send_test(ctx.prefs.all(), config)
+        if not results:
+            raise CliError("no notification channels configured; set one with "
+                           "`logr prefs set notify_email you@example.com` (or notify_telegram_chat, "
+                           "notify_discord_webhook)")
+        failed = 0
+        for channel, res in results.items():
+            if res == "ok":
+                print(f"  ✓ {channel:<9} sent")
+            else:
+                failed += 1
+                print(f"  ✗ {channel:<9} {res}")
+        return 1 if failed else 0
+
+    rep = notify.run_pass(ctx.store, utcnow(), config, admins=_admins(), dry_run=args.dry_run)
+    if args.dry_run:
+        print(f"Dry run: {len(rep.would_send)} message(s) would be sent to {rep.users} user(s).")
+        for user, channel, msg in rep.would_send:
+            print(f"  {user:<20} {channel:<9} {msg.subject}")
+    else:
+        print(f"Notification pass: {rep.users} user(s), {rep.sent} sent, {len(rep.failed)} failed.")
+    for f in rep.failed:
+        print(f"  ✗ {f}")
+    for s in rep.skipped_unconfigured:
+        print(f"  - not configured on this server: {s}")
+    return 1 if rep.failed else 0
+
+
+def cmd_ics(args: argparse.Namespace, ctx: Ctx) -> int:
+    events = ics.tracked_events(ctx.store, LOCAL_USER, utcnow())
+    text = ics.build_calendar(events)
+    if args.output:
+        try:
+            args.output.write_bytes(text.encode("utf-8"))
+        except OSError as exc:
+            raise CliError(f"can't write {args.output}: {exc.strerror or exc}") from None
+        print(f"Wrote {len(events)} event(s) to {args.output}")
+    else:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    return 0
+
+
+def cmd_feed_url(args: argparse.Namespace, ctx: Ctx) -> int:
+    base = (args.base or os.environ.get("LOGR_BASE_URL") or "http://127.0.0.1:8000").rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        raise CliError(f"--base must start with http:// or https:// (got {base!r})", 2)
+    tokens = ics.FeedTokens(ctx.store.db)
+    token = tokens.rotate(LOCAL_USER) if args.rotate else tokens.get_or_create(LOCAL_USER)
+    url = f"{base}/api/calendar.ics?token={token}"
+    print(url)
+    print("webcal://" + url.split("://", 1)[1])
+    if args.rotate:
+        print("New URL; the old one no longer works.", file=sys.stderr)
+    print("Google Calendar: Settings → Other calendars → From URL, paste the https:// URL. "
+          "Apple/Outlook: open the webcal:// URL. Keep it secret; `logr feed-url --rotate` replaces it.")
     return 0
 
 
@@ -607,12 +751,20 @@ def cmd_search_rm(args: argparse.Namespace, ctx: Ctx) -> int:
     return 0
 
 
+NOTIFY_PREF_KEYS = frozenset({"notify_email", "notify_telegram_chat", "notify_discord_webhook", "remind_offsets"})
+
+
+def _display_pref(key: str, value: str) -> str:
+    return notify.mask_secret(value) if key in SECRET_PREF_KEYS else value
+
+
 def cmd_prefs(args: argparse.Namespace, ctx: Ctx) -> int:
     values = ctx.prefs.all()
+    width = max(len(k) for k in PREF_KEYS)
     for key, desc in PREF_KEYS.items():
         val = values.get(key)
-        print(f"  {key:<15} {val if val is not None else '(unset)'}")
-        print(f"  {'':<15} {desc}")
+        print(f"  {key:<{width}} {_display_pref(key, val) if val is not None else '(unset)'}")
+        print(f"  {'':<{width}} {desc}")
     return 0
 
 
@@ -636,13 +788,18 @@ def _validate_pref(key: str, value: str, ctx: Ctx) -> str:
             except ValueError as exc:
                 raise CliError(str(exc), 2) from None
         value = ";".join(places)
+    elif key in NOTIFY_PREF_KEYS:
+        try:
+            value = notify.validate_pref(key, value)
+        except ValueError as exc:
+            raise CliError(f"{key}: {exc}", 2) from None
     return value
 
 
 def cmd_prefs_set(args: argparse.Namespace, ctx: Ctx) -> int:
     value = _validate_pref(args.key, " ".join(args.value).strip(), ctx)
     ctx.prefs.set(args.key, value)
-    print(f"{args.key} = {value}")
+    print(f"{args.key} = {_display_pref(args.key, value)}")
     return 0
 
 
@@ -659,6 +816,23 @@ def _positive_int(s: str) -> int:
     if n < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return n
+
+
+def _positive_float(s: str) -> float:
+    try:
+        n = float(s)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {s!r}") from None
+    if not n > 0 or n == float("inf"):
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return n
+
+
+def _add_schedule_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--sync-every", type=_positive_float, default=6, metavar="HOURS",
+                   help="sync all sources this often (default 6)")
+    p.add_argument("--notify-every", type=_positive_float, default=15, metavar="MINUTES",
+                   help="check for reminders to send this often (default 15)")
 
 
 def _add_filter_args(p: argparse.ArgumentParser, src_choices: list[str]) -> None:
@@ -716,7 +890,28 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--port", type=int, default=8000)
     sv.add_argument("--static", type=Path, metavar="DIR",
                     help="built dashboard to serve at / (default web/out if present)")
+    sv.add_argument("--schedule", action="store_true",
+                    help="also run scheduled syncs and reminders in this process (see `logr daemon`)")
+    _add_schedule_args(sv)
     sv.set_defaults(fn=cmd_serve)
+
+    dm = sub.add_parser("daemon", help="run scheduled syncs and reminders in the foreground (Ctrl-C to stop)")
+    _add_schedule_args(dm)
+    dm.set_defaults(fn=cmd_daemon)
+
+    nt = sub.add_parser("notify", help="send due deadline reminders now (one pass)")
+    nt.add_argument("--dry-run", action="store_true", help="show what would be sent; send and record nothing")
+    nt.add_argument("--test", action="store_true", help="send a test message through your channels")
+    nt.set_defaults(fn=cmd_notify)
+
+    ic = sub.add_parser("ics", help="your tracked deadlines as an iCalendar (.ics) file")
+    ic.add_argument("--output", "-o", type=Path, metavar="FILE", help="write to FILE instead of stdout")
+    ic.set_defaults(fn=cmd_ics)
+
+    fu = sub.add_parser("feed-url", help="calendar subscription URL (Google/Apple/Outlook)")
+    fu.add_argument("--rotate", action="store_true", help="replace the secret token; the old URL stops working")
+    fu.add_argument("--base", metavar="URL", help="server URL (default $LOGR_BASE_URL, then http://127.0.0.1:8000)")
+    fu.set_defaults(fn=cmd_feed_url)
 
     # tracking
     tr = sub.add_parser("track", help="start tracking a hackathon")

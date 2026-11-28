@@ -183,8 +183,52 @@ export interface SavedSearch {
   is_default: boolean;
 }
 
-export type PrefKey = "tz" | "luma_near" | "default_search";
+export type PrefKey =
+  | "tz"
+  | "luma_near"
+  | "default_search"
+  | "notify_email"
+  | "notify_telegram_chat"
+  | "notify_discord_webhook"
+  | "remind_offsets";
+/** GET /api/prefs. Secret keys (the Discord webhook) come back masked. */
 export type Prefs = Record<string, { value: string | null; description: string }>;
+
+// --- notifications and calendar feed (Phase 5) ----------------------------
+
+export type Channel = "email" | "telegram" | "discord";
+export const CHANNELS: Channel[] = ["email", "telegram", "discord"];
+/** The pref that holds each channel's destination. */
+export const CHANNEL_PREF: Record<Channel, PrefKey> = {
+  email: "notify_email",
+  telegram: "notify_telegram_chat",
+  discord: "notify_discord_webhook",
+};
+
+export interface ChannelStatus {
+  /** The user has set a destination. */
+  configured: boolean;
+  /** The server has what it needs to send (SMTP, bot token); always true for Discord. */
+  available: boolean;
+  /** Address or chat id; the Discord webhook is masked. */
+  destination: string | null;
+}
+
+export interface NotifyStatus {
+  channels: Record<Channel, ChannelStatus>;
+  remind_offsets: string | null;
+  last_pass_at: string | null;
+}
+
+/** POST /api/notify/test: {channel: "ok" | error message}. */
+export interface NotifyTestResult {
+  results: Partial<Record<Channel, string>> & Record<string, string>;
+}
+
+export interface Feed {
+  url: string;
+  webcal_url: string;
+}
 
 // --- transport ------------------------------------------------------------
 
@@ -293,4 +337,10 @@ export const api = {
   prefs: () => request<Prefs>("GET", "/prefs"),
   setPref: (key: PrefKey, value: string) => request<unknown>("PUT", `/prefs/${key}`, { body: { value } }),
   unsetPref: (key: PrefKey) => request<void>("DELETE", `/prefs/${key}`),
+
+  notify: () => request<NotifyStatus>("GET", "/notify"),
+  testNotify: () => request<NotifyTestResult>("POST", "/notify/test"),
+  /** Creates the feed token on first call, so only call it when the user asks. */
+  feed: () => request<Feed>("GET", "/feed"),
+  rotateFeed: () => request<Feed>("POST", "/feed/rotate"),
 };

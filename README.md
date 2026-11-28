@@ -2,7 +2,7 @@
 
 Logr finds hackathons on Devpost, Devfolio, Unstop, Hack2skill and Luma, and tracks their registration, round and submission deadlines in one place. LinkedIn support comes later; see the roadmap.
 
-The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation), 2 (exact deadlines, round timelines and cross-source dedupe) 3 (personal tracking, filters and saved searches) and 4 (web dashboard and API) are done.
+The source research and the six-phase plan are in [`docs/ROADMAP.md`](docs/ROADMAP.md). Phases 1 (aggregation), 2 (exact deadlines, round timelines and cross-source dedupe) 3 (personal tracking, filters and saved searches) 4 (web dashboard and API) and 5 (scheduled syncs, reminders and a calendar feed) are done.
 
 ## Quick start
 
@@ -82,6 +82,19 @@ logr serve                                  # http://127.0.0.1:8000, API docs at
 - **Signing in:** by default there's no login (single user). For a shared deployment, set `LOGR_AUTH=oauth` with GitHub and/or Google OAuth credentials; see the Auth section of [`docs/API.md`](docs/API.md).
 - **More:** frontend development and the mock API are covered in [`web/README.md`](web/README.md).
 
+## Reminders and calendar
+
+```bash
+logr prefs set notify_email you@example.com     # or notify_telegram_chat / notify_discord_webhook
+logr notify --test                              # check the channel works
+logr serve --schedule                           # dashboard + sync every 6h + reminders every 15 min
+logr feed-url                                   # subscribe in Google/Apple Calendar or Outlook
+```
+
+- **Reminders:** you get one 7 days, 1 day and 3 hours before each deadline you still have to act on, plus an alert when an organizer moves a date.
+- **Server setup:** email needs SMTP settings on the server, and Telegram needs a bot token. See [`docs/DEPLOY.md`](docs/DEPLOY.md) for those and for running Logr unattended.
+- **Dashboard:** both can also be set up under Settings in the dashboard.
+
 ## Commands
 
 | Command | What it does |
@@ -97,7 +110,10 @@ logr serve                                  # http://127.0.0.1:8000, API docs at
 | `logr todo UID add TEXT [--due DATE]` · `done\|undo\|rm ID` | Checklist. `--due` takes `YYYY-MM-DD` (23:59 that day) or `YYYY-MM-DD HH:MM`, in your display timezone. |
 | `logr search save NAME [filters]` · `ls` · `rm NAME` | Saved searches. Use one with `logr list --saved NAME`. |
 | `logr prefs` · `prefs set KEY VALUE` · `prefs unset KEY` | Preferences: `tz`, `luma_near`, `default_search` |
-| `logr serve [--host H] [--port P] [--static DIR]` | Run the web dashboard and JSON API. Serves `web/out` if it has been built. |
+| `logr serve [--host H] [--port P] [--static DIR] [--schedule]` | Run the web dashboard and JSON API. Serves `web/out` if it has been built. `--schedule` also runs syncs and reminders. |
+| `logr daemon [--sync-every H] [--notify-every M]` | Run the scheduler (syncs and reminders) without the web server |
+| `logr notify [--dry-run \| --test]` | Run one reminder pass now, preview it, or send a test message |
+| `logr ics [-o FILE]` · `logr feed-url [--rotate]` | Your deadlines as an .ics file, or your private calendar subscription link |
 
 Global options and environment variables:
 - `--db PATH` or `$LOGR_DB`. The default is `~/.local/share/logr/logr.db`; Phase 1 databases upgrade in place.
@@ -119,6 +135,9 @@ src/logr/
   cli.py           command-line interface
   api/             FastAPI JSON API (docs/API.md)
   auth.py          local mode, GitHub/Google OAuth, sessions, CSRF
+  notify.py        reminders, moved/health alerts; email, Telegram, Discord
+  ics.py           iCalendar feed and per-user feed tokens
+  scheduler.py     periodic sync + reminder passes
 web/               Next.js dashboard (static export served by `logr serve`)
 tests/             offline tests against recorded API fixtures
 ```

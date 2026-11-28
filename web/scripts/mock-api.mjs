@@ -6,6 +6,10 @@
 //   MOCK_AUTH=oauth npm run mock             # OAuth mode, signed in
 //   MOCK_AUTH=anon npm run mock              # OAuth mode, signed out
 //   PORT=4000 MOCK_TZ=Asia/Kolkata npm run mock
+//   MOCK_SCHEDULE=off npm run mock           # no reminder pass has run (last_pass_at null)
+//
+// Notifications: email is set up, Telegram is set up but the "server" has no
+// bot token, Discord has a (masked) webhook. The test send fails for Telegram.
 //
 // State is in memory and resets on restart. Dates are relative to "now" so
 // the UI always has upcoming deadlines to show.
@@ -14,6 +18,7 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "out");
 const PORT = Number(process.env.PORT || 3001);
@@ -316,12 +321,117 @@ const searches = new Map([
   ["blr-ai", { sources: undefined, themes: ["ai"], region: "bengaluru" }],
   ["online-big", { modes: ["online"], min_prize_usd: 10000 }],
 ]);
-const prefs = { tz: process.env.MOCK_TZ || null, luma_near: "bengaluru", default_search: null };
+const prefs = {
+  tz: process.env.MOCK_TZ || null,
+  luma_near: "bengaluru",
+  default_search: null,
+  notify_email: "asha.rao@example.com",
+  notify_telegram_chat: "481516234",
+  notify_discord_webhook: "https://discord.com/api/webhooks/1187364520193847296/kQ3vX9-tLr2mYpZbN8wHc5uJ0aEfGs7dRiOq1VnWxKe4abcd",
+  remind_offsets: null,
+};
 const PREF_DESC = {
   tz: "IANA timezone for displayed dates (used when --tz and $LOGR_TZ are absent)",
   luma_near: "';'-separated Luma places for sync (used when --luma-near and $LOGR_LUMA_NEAR are absent)",
   default_search: "saved search applied by `logr list` unless --saved or --no-prefs is given",
+  notify_email: "email address for reminders",
+  notify_telegram_chat: "Telegram chat id (or @channel) for reminders",
+  notify_discord_webhook: "Discord webhook URL for reminders",
+  remind_offsets: "how long before a deadline to remind, e.g. 7d,1d,3h",
 };
+
+// --- notifications & calendar feed (Phase 5) ------------------------------------
+
+const SECRET_PREF_KEYS = new Set(["notify_discord_webhook"]);
+// What the "server" has configured: SMTP yes, Telegram bot token no.
+const SERVER = { email: true, telegram: false, discord: true };
+const DEFAULT_OFFSETS = "7d,1d,3h";
+let lastPassAt = process.env.MOCK_SCHEDULE === "off" ? null : at(0, -0.2);
+let feedToken = null;
+
+function maskSecret(v) {
+  try {
+    const u = new URL(v);
+    return `${u.protocol}//${u.host}/…/•••••${v.slice(-4)}`;
+  } catch {
+    return `•••••${v.slice(-4)}`;
+  }
+}
+const prefOut = (k) => (prefs[k] != null && SECRET_PREF_KEYS.has(k) ? maskSecret(prefs[k]) : prefs[k]);
+
+const UNIT_S = { m: 60, h: 3600, d: 86400, w: 604800 };
+function parseOffsets(text) {
+  const parts = String(text).split(",").map((p) => p.trim().toLowerCase()).filter(Boolean);
+  if (!parts.length) throw new Error("give at least one offset, e.g. 7d,1d,3h");
+  const secs = new Map();
+  for (const p of parts) {
+    const m = /^(\d+)\s*([mhdw])$/.exec(p);
+    if (!m) throw new Error(`'${p}' isn't an offset: use a number and a unit (m, h, d, w), e.g. 3h`);
+    const s = Number(m[1]) * UNIT_S[m[2]];
+    if (s <= 0) throw new Error(`'${p}' must be more than zero`);
+    if (s > 60 * 86400) throw new Error(`'${p}' is more than 60 days`);
+    secs.set(s, `${m[1]}${m[2]}`);
+  }
+  if (secs.size > 6) throw new Error("at most 6 offsets");
+  const fmt = (s) => (s % 604800 === 0 ? `${s / 604800}w` : s % 86400 === 0 ? `${s / 86400}d` : s % 3600 === 0 ? `${s / 3600}h` : `${s / 60}m`);
+  return [...secs.keys()].sort((a, b) => b - a).map(fmt).join(",");
+}
+
+/** Mirrors notify.validate_pref: returns the value to store or throws Error(message). */
+function validatePref(key, v) {
+  if (key === "notify_email") {
+    if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]{2,}$/.test(v)) throw new Error(`'${v}' doesn't look like an email address`);
+    const [local, domain] = v.split("@");
+    return `${local}@${domain.toLowerCase()}`;
+  }
+  if (key === "notify_telegram_chat") {
+    if (!/^-?\d+$/.test(v) && !/^@[A-Za-z][A-Za-z0-9_]{4,31}$/.test(v))
+      throw new Error("a Telegram chat id is a number (e.g. 123456789, or -100… for groups) or @channelname");
+    return v;
+  }
+  if (key === "notify_discord_webhook") {
+    if (prefs.notify_discord_webhook && v === maskSecret(prefs.notify_discord_webhook)) throw new Error("enter the full webhook URL");
+    if (!/^https:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(v))
+      throw new Error("a Discord webhook URL looks like https://discord.com/api/webhooks/<id>/<token>");
+    return v;
+  }
+  if (key === "remind_offsets") return parseOffsets(v);
+  return v;
+}
+
+function notifyStatus() {
+  const ch = (name, key) => ({
+    configured: prefs[key] != null,
+    available: SERVER[name],
+    destination: prefs[key] == null ? null : prefOut(key),
+  });
+  return {
+    channels: { email: ch("email", "notify_email"), telegram: ch("telegram", "notify_telegram_chat"), discord: ch("discord", "notify_discord_webhook") },
+    remind_offsets: prefs.remind_offsets ?? DEFAULT_OFFSETS,
+    last_pass_at: lastPassAt,
+  };
+}
+
+function feedOut(req) {
+  if (!feedToken) feedToken = randomBytes(24).toString("base64url");
+  const base = `http://${req.headers.host ?? `127.0.0.1:${PORT}`}`;
+  const url = `${base}/api/calendar.ics?token=${feedToken}`;
+  return { url, webcal_url: url.replace(/^https?:/, "webcal:") };
+}
+
+function icsFeed() {
+  const esc = (s) => String(s).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
+  const stamp = (t) => t.replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Logr mock//EN", "X-WR-CALNAME:Logr", "CALSCALE:GREGORIAN"];
+  for (const t of tracked.values()) {
+    const h = byUid.get(t.uid);
+    const d = nextAction(t);
+    if (!h || !d) continue;
+    lines.push("BEGIN:VEVENT", `UID:${esc(t.uid)}-${stamp(d.at)}@logr`, `DTSTAMP:${stamp(iso(Date.now()))}`, `DTSTART:${stamp(d.at)}`, `DTEND:${stamp(d.at)}`, `SUMMARY:${esc(`${h.title}: ${d.label}`)}`, `URL:${h.url}`, "END:VEVENT");
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n") + "\r\n";
+}
 
 function track(uid, status, extra = {}) {
   const t = {
@@ -707,7 +817,7 @@ async function api(req, res, url) {
   }
   if (path === "/prefs" && m === "GET") {
     if (!needUser()) return;
-    return send(res, 200, Object.fromEntries(Object.keys(PREF_DESC).map((k) => [k, { value: prefs[k], description: PREF_DESC[k] }])));
+    return send(res, 200, Object.fromEntries(Object.keys(PREF_DESC).map((k) => [k, { value: prefOut(k), description: PREF_DESC[k] }])));
   }
   if ((mm = path.match(/^\/prefs\/([^/]+)$/))) {
     if (!needUser()) return;
@@ -724,13 +834,48 @@ async function api(req, res, url) {
         }
       }
       if (key === "default_search" && !searches.has(v)) return err(res, 400, `no saved search '${v}'`);
-      prefs[key] = v;
-      return send(res, 200, { key, value: v });
+      let stored = v;
+      try {
+        stored = validatePref(key, v);
+      } catch (e) {
+        return err(res, 400, e.message);
+      }
+      prefs[key] = stored;
+      return send(res, 200, { key, value: prefOut(key) });
     }
     if (m === "DELETE") {
       prefs[key] = null;
       return send(res, 204);
     }
+  }
+  // notifications & calendar feed
+  if (path === "/calendar.ics" && m === "GET") {
+    if (!feedToken || sp.get("token") !== feedToken) return err(res, 404, "Not Found");
+    res.writeHead(200, { "Content-Type": "text/calendar; charset=utf-8", "Cache-Control": "private, max-age=300" });
+    return res.end(icsFeed());
+  }
+  if (path === "/feed" && m === "GET") {
+    if (!needUser()) return;
+    return send(res, 200, feedOut(req));
+  }
+  if (path === "/feed/rotate" && m === "POST") {
+    if (!needUser()) return;
+    feedToken = null;
+    return send(res, 200, feedOut(req));
+  }
+  if (path === "/notify" && m === "GET") {
+    if (!needUser()) return;
+    return send(res, 200, notifyStatus());
+  }
+  if (path === "/notify/test" && m === "POST") {
+    if (!needUser()) return;
+    const st = notifyStatus().channels;
+    const names = Object.keys(st).filter((c) => st[c].configured);
+    if (!names.length) return err(res, 400, "no notification channel configured: set notify_email, notify_telegram_chat or notify_discord_webhook first");
+    await new Promise((r) => setTimeout(r, 700));
+    const results = {};
+    for (const c of names) results[c] = !SERVER[c] ? (c === "telegram" ? "server has no LOGR_TELEGRAM_BOT_TOKEN" : "server has no SMTP settings (LOGR_SMTP_HOST)") : "ok";
+    return send(res, 200, { results });
   }
   return err(res, 404, "Not Found");
 }

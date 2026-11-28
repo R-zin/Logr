@@ -221,3 +221,27 @@ class PrefSet(BaseModel):
     key: str
     value: str
     description: str
+
+
+# --- notifications and calendar feed (Phase 5) ------------------------------------
+
+
+class FeedOut(BaseModel):
+    url: str
+    webcal_url: str
+
+
+class ChannelOut(BaseModel):
+    configured: bool
+    available: bool
+    destination: str | None
+
+
+class NotifyOut(BaseModel):
+    channels: dict[Literal["email", "telegram", "discord"], ChannelOut]
+    remind_offsets: str
+    last_pass_at: UTCDateTime | None
+
+
+class NotifyTestOut(BaseModel):
+    results: dict[str, str]

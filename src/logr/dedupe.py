@@ -161,3 +161,14 @@ def group(items: list[Hackathon]) -> list[Listing]:
                 rest.append(m)
         out.append(Listing(primary, rest))
     return out
+
+
+def best_records(items: list[Hackathon]) -> dict[str, Hackathon]:
+    """uid → the most precise record of its cross-source group (the merged
+    primary). Deadlines for a tracked hackathon come from here, so tracking
+    the Luma copy of a hackathon also on Devfolio uses Devfolio's exact dates."""
+    out: dict[str, Hackathon] = {}
+    for lst in group(items):
+        for h in lst.all:
+            out[h.uid] = lst.primary
+    return out
