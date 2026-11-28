@@ -11,8 +11,9 @@ from starlette.types import Scope
 
 from logr import auth as auth_mod
 from logr.auth import AuthConfig
+from logr.notify import NotifierConfig
 
-from . import hackathons, searches, sync, tracking
+from . import feeds, hackathons, searches, sync, tracking
 from .deps import csrf
 
 
@@ -32,13 +33,16 @@ def create_app(
     *,
     auth: AuthConfig | None = None,
     static_dir: str | Path | None = None,
+    notifier: NotifierConfig | None = None,
 ) -> FastAPI:
     config = auth if auth is not None else AuthConfig.from_env()
+    notifier_config = notifier if notifier is not None else NotifierConfig.from_env()
     # CSRF is an app-wide dependency so it covers every router, auth's included.
     app = FastAPI(title="Logr", docs_url="/api/docs", redoc_url=None, openapi_url="/api/openapi.json",
                   dependencies=[Depends(csrf)])
     app.state.db_path = str(db_path)
     app.state.auth = config
+    app.state.notifier = notifier_config
     auth_mod.ensure_users_table(str(db_path))
 
     app.include_router(auth_mod.router)
@@ -46,6 +50,7 @@ def create_app(
     app.include_router(tracking.router)
     app.include_router(searches.router)
     app.include_router(sync.router)
+    app.include_router(feeds.router)
 
     if static_dir is not None and Path(static_dir).is_dir():
         app.router.routes.append(_StaticMount("/", app=StaticFiles(directory=str(static_dir), html=True),

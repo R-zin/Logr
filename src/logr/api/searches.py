@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Response
 
-from logr.searches import PREF_KEYS, Filter
+from logr import notify
+from logr.searches import PREF_KEYS, SECRET_PREF_KEYS, Filter
 from logr.sources.luma import resolve_place
 
 from .deps import UserViewDep, View, bad_request, not_found
@@ -63,7 +64,16 @@ def delete_search(name: str, view: UserViewDep) -> Response:
 @router.get("/prefs", response_model=dict[str, PrefOut])
 def get_prefs(view: UserViewDep) -> dict[str, PrefOut]:
     values = view.prefs.all()
-    return {k: PrefOut(value=values.get(k), description=desc) for k, desc in PREF_KEYS.items()}
+    return {k: PrefOut(value=_display(k, values.get(k)), description=desc) for k, desc in PREF_KEYS.items()}
+
+
+NOTIFY_PREF_KEYS = frozenset({"notify_email", "notify_telegram_chat", "notify_discord_webhook", "remind_offsets"})
+MASK_CHAR = "\u2022"  # "•", which notify.mask_secret uses for the hidden part
+
+
+def _display(key: str, value: str | None) -> str | None:
+    """A pref value as shown to clients: secrets masked."""
+    return notify.mask_secret(value) if value and key in SECRET_PREF_KEYS else value
 
 
 def validate_pref(key: str, value: str, view: View) -> str:
@@ -88,6 +98,16 @@ def validate_pref(key: str, value: str, view: View) -> str:
             except ValueError as exc:
                 raise bad_request(str(exc)) from None
         value = ";".join(places)
+    elif key in NOTIFY_PREF_KEYS:
+        if key in SECRET_PREF_KEYS:
+            # The client only ever sees the masked form; never store it back.
+            current = view.prefs.get(key)
+            if MASK_CHAR in value or (current and value == notify.mask_secret(current)):
+                raise bad_request("enter the full webhook URL")
+        try:
+            value = notify.validate_pref(key, value)
+        except ValueError as exc:
+            raise bad_request(str(exc)) from None
     return value
 
 
@@ -97,7 +117,7 @@ def set_pref(key: str, body: PrefIn, view: UserViewDep) -> PrefSet:
         raise not_found(f"unknown preference {key!r}")
     value = validate_pref(key, body.value, view)
     view.prefs.set(key, value)
-    return PrefSet(key=key, value=value, description=PREF_KEYS[key])
+    return PrefSet(key=key, value=_display(key, value) or value, description=PREF_KEYS[key])
 
 
 @router.delete("/prefs/{key}", status_code=204)
