@@ -7,7 +7,7 @@ import { api, ApiError, type Deadline, type Mode, type Source, type Status } fro
 import { MODE_LABEL, SOURCE_LABEL, STATUS_LABEL } from "@/lib/labels";
 import { useSession } from "@/lib/session";
 import { formatDateTime, formatShort, relative, urgency } from "@/lib/time";
-import { IconGitHub, IconGoogle } from "./icons";
+import { IconCheck, IconGitHub, IconGoogle } from "./icons";
 
 export function cx(...c: Array<string | false | null | undefined>): string {
   return c.filter(Boolean).join(" ");
@@ -24,6 +24,38 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/** A titled block on a page like Settings: h2 + optional subtitle and actions. */
+export function PageSection({
+  id,
+  title,
+  subtitle,
+  aside,
+  className,
+  children,
+}: {
+  id: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  aside?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section aria-labelledby={id} className={className}>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id={id} className="text-lg font-semibold tracking-tight">
+            {title}
+          </h2>
+          {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
+        </div>
+        {aside && <div className="flex items-center gap-3">{aside}</div>}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -74,6 +106,15 @@ export function InlineError({ error }: { error: unknown }) {
     <p role="alert" className="mt-2 text-xs text-warm">
       {msg}
     </p>
+  );
+}
+
+/** A "✓ Saved" note that fades in for a moment after a save. */
+export function SavedNote({ show, children = "Saved" }: { show: boolean; children?: ReactNode }) {
+  return (
+    <span role="status" className={cx("inline-flex items-center gap-1 text-xs text-good transition-opacity", show ? "opacity-100" : "opacity-0")}>
+      <IconCheck width={14} height={14} aria-hidden /> {show ? children : ""}
+    </span>
   );
 }
 

@@ -1,8 +1,10 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconCheck, IconRefresh } from "@/components/icons";
-import { ErrorState, InlineError, PageHeader, SignInButtons, Skeleton, cx, useDocTitle } from "@/components/ui";
+import { IconRefresh } from "@/components/icons";
+import { CalendarFeed } from "@/components/CalendarFeed";
+import { NotifySettings } from "@/components/NotifySettings";
+import { ErrorState, InlineError, PageHeader, PageSection, SavedNote, SignInButtons, Skeleton, cx, useDocTitle } from "@/components/ui";
 import { api, ApiError, type PrefKey, type SavedSearch, type SyncStatus } from "@/lib/api";
 import { sourceLabel } from "@/lib/labels";
 import { useNow, useSession } from "@/lib/session";
@@ -32,13 +34,7 @@ function useSaver() {
   return { save, saving, saved, error };
 }
 
-function Saved({ show }: { show: boolean }) {
-  return (
-    <span role="status" className={cx("inline-flex items-center gap-1 text-xs text-good transition-opacity", show ? "opacity-100" : "opacity-0")}>
-      <IconCheck width={14} height={14} /> {show ? "Saved" : ""}
-    </span>
-  );
-}
+const Saved = SavedNote;
 
 function Row({ label, htmlFor, help, children }: { label: string; htmlFor: string; help?: string; children: React.ReactNode }) {
   return (
@@ -83,7 +79,7 @@ function Preferences() {
   if (!me?.user)
     return (
       <div className="card px-5 py-6">
-        <p className="text-sm text-muted">Sign in to set your timezone and default search.</p>
+        <p className="text-sm text-muted">Sign in to set your timezone, default search, notifications and calendar feed.</p>
         <div className="mt-3">
           <SignInButtons />
         </div>
@@ -327,9 +323,17 @@ function Settings() {
     <>
       <PageHeader
         title="Settings"
-        subtitle={me?.auth_mode === "local" ? "Single-user mode: these preferences are shared with the logr CLI." : "Your preferences and the state of the data sync."}
+        subtitle={me?.auth_mode === "local" ? "Single-user mode: these preferences are shared with the logr CLI." : "Your preferences, notifications, calendar feed and the state of the data sync."}
       />
-      <Preferences />
+      <PageSection id="prefs-h" title="Preferences">
+        <Preferences />
+      </PageSection>
+      {me?.user && (
+        <>
+          <NotifySettings className="mt-10" />
+          <CalendarFeed className="mt-10" />
+        </>
+      )}
       <SyncPanel />
     </>
   );
